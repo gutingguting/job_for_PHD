@@ -1,6 +1,6 @@
 # Setup Workflow
 
-Use this reference when initializing JobHuntBot for a new user or refreshing their job-search operating system.
+Use this reference when initializing job_for_PHD for a new user or refreshing their job-search operating system.
 
 This document is the agent's SOP, not a form for the user to complete manually. Guide the user through setup conversationally. Draft files and templates for them whenever possible.
 
@@ -21,6 +21,8 @@ Keep first-time onboarding short. Aim for 8-10 minutes. Do not ask the user to f
 5. Answer Bank
 6. First Trial Run
 
+If the user is considering postdoctoral work, also enable the dedicated postdoc workflow in the Profile Center. Do not force PI/group prospects into the company-job pipeline.
+
 Do not apply to jobs until the first four are complete.
 
 ## Minimum Viable Setup
@@ -32,7 +34,7 @@ For a first run, collect only:
 - Work authorization and sponsorship rules.
 - Resume files and file formats.
 - Resume mode: Volume or Precision. Default to Volume.
-- Voluntary self-ID strategy: tell the user that if they do not choose, JobHuntBot will default to `Prefer not to say` / decline / leave blank when available.
+- Voluntary self-ID strategy: tell the user that if they do not choose, job_for_PHD will default to `Prefer not to say` / decline / leave blank when available.
 - Custom answer policy: draft first, ask once before reuse.
 - Must-skip rules.
 - Intended job boards/accounts.
@@ -179,7 +181,7 @@ If the user is unsure, recommend Volume mode:
 - Use short, low-friction applications.
 - Promote a specific high-fit role to Precision when it is worth extra work.
 
-JobHuntBot can use external fit signals from tools like Jobright or Simplify when the user already uses them. These tools are optional, not required.
+job_for_PHD can use external fit signals from tools like Jobright or Simplify when the user already uses them. These tools are optional, not required.
 
 If no external fit score is available, estimate fit qualitatively from:
 
@@ -259,7 +261,7 @@ Voluntary self-ID strategy:
 - During onboarding, ask only for the user's strategy, not detailed identity answers.
 - Default to `Prefer not to say`, decline, or leave blank when available.
 - If the user wants exact answers used, store them only in their private candidate profile.
-- If the user does not choose a strategy, explicitly tell them JobHuntBot will default to non-disclosure and will not guess identity information.
+- If the user does not choose a strategy, explicitly tell them job_for_PHD will default to non-disclosure and will not guess identity information.
 
 Custom answer policy:
 
@@ -298,3 +300,14 @@ Before any application trial:
 7. Verify that dashboard updates are correct.
 
 The first application trial should expose permission, upload, dropdown, session, and tracking issues before the user relies on automation overnight.
+
+## Postdoctoral Workflow
+
+For postdoctoral opportunities, record each PI/group or public opening in `user-data/dashboard/postdoc_pipeline.csv` with:
+
+- PI/group, institute, country/region, and research fit.
+- Funding status and whether the opportunity is an open position or a cold-email prospect.
+- Contacted, replied, interview, and follow-up state.
+- Research-statement and reference-letter readiness.
+
+Verify openings and funding on official institute, university, or group pages. CERN, PSI, GSI, DESY, universities, detector electronics, proton therapy, and instrumentation are search presets only. Never claim an opening exists until it is verified. Never mark a PI as contacted until a real message was sent with user approval.

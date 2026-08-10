@@ -1,3 +1,18 @@
 my-materials/
+.runtime/
+node_modules/
+user-data/
+backups/
+
+# Legacy private user files from versions before 1.0.
+/candidate_profile.json
+/application_rules.md
+/resume_routing.md
+/answer_bank.md
+/experience_bank.md
+/onboarding_status.md
+
+# Local logs.
+*.log
 .DS_Store
 Thumbs.db

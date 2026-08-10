@@ -105,6 +105,23 @@ Fields:
 - `source_blocker_or_lesson`: link to blocker, application, or observation.
 - `status`: active, testing, retired.
 
+### `postdoc_pipeline.csv`
+
+Dedicated postdoctoral opportunity pipeline. Do not mix prospects or cold-email plans into the normal submitted-job count.
+
+Fields:
+
+- `pi_group`, `institute`, `country_region`: PI/group and host institution.
+- `research_fit`: evidence-based research alignment.
+- `funding_status`: funded, PI-funded, fellowship required, self-funded, or unknown.
+- `opportunity_type`: `open_position` or `cold_email`.
+- `status`: Prospect, Open position, Cold email planned, Contacted, Replied, Interview, Offer, or Closed.
+- `contacted_date`, `reply_summary`, `interview_date`, `follow_up_date`.
+- `research_statement_status`, `reference_letters_status`.
+- `next_action`, `notes`, `last_verified`.
+
+Verify openings and funding on official institute, university, or research-group pages. A planned cold email is not a contact; a tracked PI is not an application.
+
 ## Counting Rules
 
 - Count only confirmed submissions in `submitted_count`.
