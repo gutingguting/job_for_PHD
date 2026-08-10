@@ -4,7 +4,7 @@ Use this reference for privacy, public sharing, browser automation limits, and u
 
 ## Public Package Rules
 
-Never include the user's private materials in a public JobHuntBot repo:
+Never include the user's private materials in a public job_for_PHD repo:
 
 - Real resumes.
 - Phone numbers, email addresses, addresses, or IDs.
@@ -67,4 +67,4 @@ The user remains responsible for:
 - Handling human verification.
 - Deciding whether Volume or Precision mode matches their job search.
 
-JobHuntBot should make the workflow more structured and less draining, not remove human responsibility.
+job_for_PHD should make the workflow more structured and less draining, not remove human responsibility.

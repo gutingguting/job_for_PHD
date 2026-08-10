@@ -1,11 +1,11 @@
 ---
-name: jobhuntbot
-description: "A reusable job application workflow for Codex and other AI agents. Use when a user wants to set up or run an AI-assisted job search system: collecting a candidate profile, creating an application dashboard, defining screening and resume-routing rules, finding and ranking job leads, applying to jobs within explicit safety boundaries, recording outcomes, triaging blockers, or iterating a job application workflow."
+name: job-for-phd
+description: "A local-first job and postdoctoral application workflow for AI agents: profile onboarding, resume routing, role and PI/group research, application tracking, blockers, follow-up, and explicit safety boundaries."
 ---
 
-# JobHuntBot
+# job_for_PHD
 
-JobHuntBot is a job application operating workflow for AI agents. It helps users turn job searching into a repeatable system: profile, dashboard, screening rules, resume strategy, application execution, blocker triage, and follow-up.
+job_for_PHD is a job and postdoctoral application operating workflow for AI agents. It helps users turn job searching into a repeatable system: profile, dashboard, screening rules, resume strategy, PI/group research, application execution, blocker triage, and follow-up.
 
 ## Core Contract 
 
@@ -29,11 +29,11 @@ If any source is missing, initialize it first. Do not guess identity, legal, wor
 
 Read `references/setup-workflow.md` when:
 
-- The user is installing JobHuntBot for the first time.
+- The user is installing job_for_PHD for the first time.
 - The user asks to create a profile, dashboard, rules, templates, or GitHub-ready setup.
 - The user has not provided enough information for safe applications.
 
-Use the templates in `templates/` to create user-owned files:
+Prefer the interactive Profile Center at `http://localhost:8420/dashboard.html#profile`. Runtime files belong under the git-ignored `user-data/` directory; templates are only clean defaults:
 
 - `candidate_profile.template.json`
 - `application_rules.template.md`
@@ -42,7 +42,21 @@ Use the templates in `templates/` to create user-owned files:
 - `experience_bank.template.md`
 - `dashboard-template/*.csv`
 
-### 2. Confirm the Company and Research the Opening
+Canonical private agent files are under `user-data/agent/`, while live dashboard CSVs are under `user-data/dashboard/`. Never write personal data back into tracked templates.
+
+### 2. Choose the Opportunity Workflow
+
+Use the normal job pipeline for company roles. Use `user-data/dashboard/postdoc_pipeline.csv` for postdoctoral opportunities and keep these concepts distinct:
+
+- PI / group and institute.
+- Research fit and funding status.
+- Public opening versus cold email.
+- Contacted PI, reply, interview, and follow-up state.
+- Research statement and reference-letter readiness.
+
+For postdoc research, prioritize official institute/university and group pages. CERN, PSI, GSI, DESY, universities, detector electronics, proton therapy, and instrumentation are suggestions, not claims that an opportunity exists. Verify every opening and funding statement before recording it. Never mark a cold-email prospect as applied or contacted until an actual message was sent by the user or with their explicit approval.
+
+### 3. Confirm the Company or Institute and Research the Opening
 
 When the user names a specific company (or you're evaluating one you found), work it one company at a time:
 
@@ -52,19 +66,19 @@ When the user names a specific company (or you're evaluating one you found), wor
 - Write findings back into `job_pool` immediately (job_url, next_action, notes, and a status update if warranted) — don't hold research in your head until the end of the session.
 - If you add a structured status column to `job_pool` for tracking a specific recurring question (e.g. whether a hiring cycle is confirmed open), set it explicitly every time you finish checking a row rather than leaving the dashboard to infer it from free-text `notes` — notes-based regex guessing quietly rots into false positives once notes get detailed. A stale structured column means the dashboard won't reflect what you just learned, even after a refresh.
 
-### 3. Screen Before Applying
+### 4. Screen Before Applying
 
 Prioritize jobs by freshness, fit, feasibility, and conversion likelihood. Default to fresh jobs from the last 24 hours, then 48 hours if needed.
 
 Skip or defer roles that violate the user's rules, are clearly overleveled, are closed or duplicate, require unsupported work authorization, need missing materials, or involve long account-heavy flows with weak fit.
 
-### 4. Shortlist Specific Positions and Let the User Choose
+### 5. Shortlist Specific Positions and Let the User Choose
 
 Once a company's opening is confirmed, don't jump straight to filling out a form. Find the *specific* postings that match the user's target role families (search the portal by keyword — job categories on a careers site often don't literally say "supply chain" even when a matching role exists) and present a short list: title, one-line fit summary, level/eligibility, location, and whether it's full-time campus recruiting (not an internship or a stale prior-cycle posting).
 
 If a company limits applicants to one or two total submissions in the cycle, say so before the user picks — it changes the decision. Let the user pick which posting to pursue; only proceed on your own initiative if the user has already named the exact posting.
 
-### 5. Match Experience to the Role
+### 6. Match Experience to the Role
 
 Before touching the application, decide which of the candidate's experiences to actually feature for this specific posting — this is a separate decision from which resume file to use.
 
@@ -75,7 +89,7 @@ Before touching the application, decide which of the candidate's experiences to 
 - After submitting, note which experiences were actually used in `application_log`'s notes — this lets a later application to a similar role or company reuse the same reasoning instead of re-deriving it.
 - Same truthfulness rule as everywhere else: reorder, select, and emphasize freely; never invent, exaggerate, or stretch an experience to make it look like a better fit than it is. If nothing in the bank fits well, say so and use the closest honest match.
 
-### 6. Route the Resume Strategy
+### 7. Route the Resume Strategy
 
 Use the user's chosen strategy:
 
@@ -86,7 +100,7 @@ Default to Volume mode unless the user explicitly asks for Precision. Individual
 
 Never fabricate experience, credentials, degrees, employers, dates, work authorization, or portfolio artifacts.
 
-### 7. Fill Out the Application
+### 8. Fill Out the Application
 
 Read `references/application-playbook.md` before operating browser-based applications, LinkedIn Easy Apply, Simplify, Greenhouse, Lever, Ashby, Workday, or other ATS flows.
 
@@ -94,11 +108,11 @@ Prefer uploading the resume first and letting the ATS auto-parse it — it's les
 
 Stop or hand off for CAPTCHA, Cloudflare, anti-bot checks, login or 2FA, unclear legal/identity questions, missing files, payment prompts, permission prompts, or anything that would require bypassing a site control.
 
-### 8. Preview, User Confirms, Submit
+### 9. Preview, User Confirms, Submit
 
 Before the final submit click, show the user a summary (company, role, resume version, the internship/project experiences selected in step 5, key answers, compensation figures). **Do not click final submit until the user explicitly says to** — a preview screen is not consent. After submitting, look for real confirmation evidence (success text, a thank-you/confirmation URL, a candidate ID) before recording anything as `Submitted`.
 
-### 9. Sync Everything — Dashboard and Profile
+### 10. Sync Everything — Dashboard and Profile
 
 Every job lead or attempt must end in one of these states:
 
@@ -116,12 +130,12 @@ For a real submission, update the same dashboard files (`job_pool` status, `appl
 
 When recording a submission in `application_log`, also capture the full job description text (responsibilities and requirements) from the official posting into the `job_description` field, copied verbatim from the source — not summarized or paraphrased. This is what makes later interview prep possible without having to re-find a posting that may since have been taken down.
 
-### 10. Learn From Blockers
+### 11. Learn From Blockers
 
-After each run, summarize blockers and convert repeated issues into rules. JobHuntBot should improve through use: address matching, dropdown handling, resume upload checks, account/session checks, and ATS-specific lessons belong in the dashboard and rules.
+After each run, summarize blockers and convert repeated issues into rules. job_for_PHD should improve through use: address matching, dropdown handling, resume upload checks, account/session checks, and ATS-specific lessons belong in the dashboard and rules.
 
 ## Safety
 
 Read `references/safety-and-boundaries.md` when the user asks about automation limits, CAPTCHA, email verification, account login, privacy, public sharing, or what should not be included in a repo.
 
-Do not publish or copy private resumes, phone numbers, emails, addresses, immigration documents, application history, browser sessions, cookies, OTPs, or user-specific secrets into a public JobHuntBot package.
+Do not publish or copy private resumes, phone numbers, emails, addresses, immigration documents, application history, browser sessions, cookies, OTPs, or user-specific secrets into a public job_for_PHD package.

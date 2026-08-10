@@ -23,7 +23,7 @@ Default handling:
 
 - Basic profile facts can be reused automatically when clear.
 - High-impact answers require exact profile facts or answer-bank wording.
-- Voluntary self-ID defaults to blank, "Prefer not to say", or decline/skip when the form allows it. If the user does not configure exact answers, tell them JobHuntBot will default to non-disclosure.
+- Voluntary self-ID defaults to blank, "Prefer not to say", or decline/skip when the form allows it. If the user does not configure exact answers, tell them job_for_PHD will default to non-disclosure.
 - For custom questions, draft a concise answer from the user's facts and ask once before reuse.
 - Reuse or adapt confirmed custom-answer patterns later, but stop if the answer introduces a new claim, unsupported metric, legal/visa/salary fact, portfolio/writing sample, video, or company-specific technical claim.
 

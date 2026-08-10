@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "resume_mode": "Volume",
+  "trial_boundary": "lead_finding_only",
+  "self_identification_strategy": "prefer_not_to_say",
+  "custom_answer_policy": "draft_first_ask_once_before_reuse",
+  "final_submission_requires_approval": true,
+  "application_authorized": false,
+  "freshness_hours": [24, 48],
+  "intended_job_boards": [],
+  "postdoc": {
+    "enabled": false,
+    "target_institutions": [],
+    "research_areas": [],
+    "opportunity_modes": ["open_position", "cold_email"],
+    "funding_preferences": []
+  }
+}

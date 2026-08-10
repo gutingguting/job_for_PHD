@@ -1,387 +1,428 @@
-// Zero-dependency static file server for the local job-search dashboard.
-// Serves this folder on http://localhost:8420 so dashboard.html can fetch()
-// the CSV files with fresh data on every reload. Also exposes write
-// endpoints so the dashboard can:
-//   - mark a job as Offer/Rejected (POST /api/update-status)
-//   - add/edit/delete an upcoming calendar event, which also stamps the
-//     job's current_stage in job_pool.csv (POST /api/calendar/*)
+// Local-only server for job_for_PHD. It serves the dashboard and keeps all
+// candidate files under the git-ignored user-data directory.
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
+const Busboy = require('busboy');
+const {
+  APP_NAME, APP_VERSION, PORT, PROJECT_ROOT, DASHBOARD_ROOT, DATA_ROOT,
+  DASHBOARD_DATA_ROOT, RESUME_FILES_ROOT, PROFILE_PATH, PREFERENCES_PATH,
+  ONBOARDING_PATH, RESUME_INDEX_PATH,
+} = require('../src/config');
+const { initializeData } = require('../src/migration');
+const { calculateReadiness, validateProfile } = require('../src/readiness');
+const { refreshCompatibility } = require('../src/compatibility');
+const { readJSON, writeJSON, atomicWrite, safeFilename } = require('../src/storage');
+const { parseResume } = require('../src/resume-parser');
 
-const PORT = 8420;
-const ROOT = __dirname;
-const JOB_POOL_PATH = path.join(ROOT, 'job_pool.csv');
-const FOLLOW_UP_PATH = path.join(ROOT, 'follow_up.csv');
-
+const MAX_JSON_BYTES = 1024 * 1024;
+const MAX_RESUME_BYTES = 10 * 1024 * 1024;
+const JOB_POOL_PATH = path.join(DASHBOARD_DATA_ROOT, 'job_pool.csv');
+const FOLLOW_UP_PATH = path.join(DASHBOARD_DATA_ROOT, 'follow_up.csv');
+const POSTDOC_PATH = path.join(DASHBOARD_DATA_ROOT, 'postdoc_pipeline.csv');
 const MIME = {
-  '.html': 'text/html; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.csv': 'text/csv; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
+  '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8', '.csv': 'text/csv; charset=utf-8',
+  '.json': 'application/json; charset=utf-8', '.png': 'image/png', '.ico': 'image/x-icon',
 };
 
-// Same quoted-field CSV dialect job_pool.csv already uses (every field
-// quoted, "" for an embedded quote, CRLF line endings).
-function parseCSV(text) {
-  const rows = [];
-  let row = [], field = '', inQuotes = false;
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i], next = text[i + 1];
-    if (inQuotes) {
-      if (c === '"' && next === '"') { field += '"'; i++; }
-      else if (c === '"') { inQuotes = false; }
-      else { field += c; }
-    } else {
-      if (c === '"') { inQuotes = true; }
-      else if (c === ',') { row.push(field); field = ''; }
-      else if (c === '\r') { /* skip */ }
-      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
-      else { field += c; }
-    }
-  }
-  if (field.length || row.length) { row.push(field); rows.push(row); }
-  while (rows.length && rows[rows.length - 1].length === 1 && rows[rows.length - 1][0] === '') rows.pop();
-  return rows;
+initializeData();
+
+function sendJSON(res, status, value) {
+  res.writeHead(status, {
+    'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY',
+  });
+  res.end(JSON.stringify(value));
 }
 
-function stringifyField(f) {
-  return '"' + String(f == null ? '' : f).replace(/"/g, '""') + '"';
+function sendError(res, status, message, details) {
+  sendJSON(res, status, { ok: false, error: message, details });
 }
 
-function stringifyCSV(rows) {
-  return rows.map(r => r.map(stringifyField).join(',')).join('\r\n') + '\r\n';
-}
-
-function readCSVRows(filePath) {
-  const text = fs.readFileSync(filePath, 'utf8');
-  const rows = parseCSV(text);
-  return { header: rows[0], dataRows: rows.slice(1) };
-}
-
-function writeCSVRows(filePath, header, dataRows) {
-  fs.writeFileSync(filePath, stringifyCSV([header, ...dataRows]));
-}
-
-function readJSONBody(req) {
+function readJSONBody(req, maxBytes = MAX_JSON_BYTES) {
   return new Promise((resolve, reject) => {
-    let body = '';
+    const chunks = [];
+    let size = 0;
     req.on('data', chunk => {
-      body += chunk;
-      if (body.length > 1e6) req.destroy(); // guard against runaway payloads
+      size += chunk.length;
+      if (size > maxBytes) {
+        reject(Object.assign(new Error('Request body is too large'), { status: 413 }));
+        req.destroy();
+        return;
+      }
+      chunks.push(chunk);
     });
     req.on('end', () => {
-      try { resolve(JSON.parse(body)); }
-      catch (e) { reject(new Error('Invalid JSON body')); }
+      try { resolve(JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}')); }
+      catch { reject(Object.assign(new Error('Invalid JSON body'), { status: 400 })); }
     });
     req.on('error', reject);
   });
 }
 
-function sendJSON(res, statusCode, obj) {
-  res.writeHead(statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
-  res.end(JSON.stringify(obj));
+function loadState() {
+  const profile = readJSON(PROFILE_PATH, {});
+  const preferences = readJSON(PREFERENCES_PATH, {});
+  const resumes = readJSON(RESUME_INDEX_PATH, []);
+  const readiness = calculateReadiness(profile, preferences, resumes);
+  return { profile, preferences, resumes, readiness };
+}
+
+function persistDerived(state, onboardingPatch = {}) {
+  const onboarding = readJSON(ONBOARDING_PATH, {});
+  writeJSON(ONBOARDING_PATH, {
+    ...onboarding,
+    ...onboardingPatch,
+    readiness: state.readiness,
+    last_saved_at: new Date().toISOString(),
+  });
+  refreshCompatibility(state.profile, state.preferences, state.readiness, state.resumes);
+}
+
+function parseCSV(text) {
+  const rows = [];
+  let row = [], field = '', inQuotes = false;
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i], next = text[i + 1];
+    if (inQuotes) {
+      if (c === '"' && next === '"') { field += '"'; i += 1; }
+      else if (c === '"') inQuotes = false;
+      else field += c;
+    } else if (c === '"') inQuotes = true;
+    else if (c === ',') { row.push(field); field = ''; }
+    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+    else if (c !== '\r') field += c;
+  }
+  if (field.length || row.length) { row.push(field); rows.push(row); }
+  while (rows.length && rows.at(-1).length === 1 && rows.at(-1)[0] === '') rows.pop();
+  return rows;
+}
+
+function stringifyCSV(rows) {
+  const field = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
+  return `${rows.map(row => row.map(field).join(',')).join('\r\n')}\r\n`;
+}
+
+function readCSVRows(filePath) {
+  const rows = parseCSV(fs.readFileSync(filePath, 'utf8'));
+  return { header: rows[0] || [], dataRows: rows.slice(1) };
+}
+
+function writeCSVRows(filePath, header, dataRows) {
+  atomicWrite(filePath, stringifyCSV([header, ...dataRows]));
+}
+
+function locateJobRow(jobRowIndex, company, jobTitle) {
+  if (!Number.isInteger(jobRowIndex) || jobRowIndex < 0) throw Object.assign(new Error('jobRowIndex must be a non-negative integer'), { status: 400 });
+  const { header, dataRows } = readCSVRows(JOB_POOL_PATH);
+  const companyCol = header.indexOf('company');
+  const titleCol = header.indexOf('job_title');
+  const statusCol = header.indexOf('status');
+  const stageCol = header.indexOf('current_stage');
+  if ([companyCol, titleCol, statusCol, stageCol].includes(-1)) throw Object.assign(new Error('job_pool.csv is missing expected columns'), { status: 500 });
+  const target = dataRows[jobRowIndex];
+  if (!target || target[companyCol] !== company || target[titleCol] !== jobTitle) throw Object.assign(new Error('Dashboard data changed; refresh and try again'), { status: 409 });
+  return { header, dataRows, statusCol, stageCol, target };
+}
+
+async function updateStatus(req, res) {
+  const body = await readJSONBody(req);
+  if (!['Offer', 'Rejected'].includes(body.status)) return sendError(res, 400, 'status must be Offer or Rejected');
+  const job = locateJobRow(body.rowIndex, body.company, body.job_title);
+  job.target[job.statusCol] = body.status;
+  writeCSVRows(JOB_POOL_PATH, job.header, job.dataRows);
+  sendJSON(res, 200, { ok: true });
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const TIME_RE = /^\d{2}:\d{2}$/;
 
-async function handleUpdateStatus(req, res) {
-  let payload;
-  try {
-    payload = await readJSONBody(req);
-  } catch (e) {
-    return sendJSON(res, 400, { ok: false, error: e.message });
-  }
+async function calendarAdd(req, res) {
+  const body = await readJSONBody(req);
+  if (!DATE_RE.test(body.date) || !TIME_RE.test(body.time) || !String(body.event_type || '').trim()) return sendError(res, 400, 'Date, time and event content are required');
+  const job = locateJobRow(body.jobRowIndex, body.company, body.job_title);
+  if (job.target[job.statusCol] !== 'Submitted') return sendError(res, 409, 'Calendar events are only available for submitted jobs');
+  const { header, dataRows } = readCSVRows(FOLLOW_UP_PATH);
+  const row = new Array(header.length).fill('');
+  const set = (name, value) => { const col = header.indexOf(name); if (col >= 0) row[col] = value; };
+  set('date', body.date); set('time', body.time); set('company', body.company);
+  set('job_title', body.job_title); set('event_type', body.event_type.trim()); set('status', 'Scheduled');
+  dataRows.push(row);
+  job.target[job.stageCol] = body.event_type.trim();
+  writeCSVRows(FOLLOW_UP_PATH, header, dataRows);
+  writeCSVRows(JOB_POOL_PATH, job.header, job.dataRows);
+  sendJSON(res, 200, { ok: true, followUpRowIndex: dataRows.length - 1, current_stage: body.event_type.trim() });
+}
 
-  const { rowIndex, company, job_title, status } = payload || {};
-  if (!['Offer', 'Rejected'].includes(status)) {
-    return sendJSON(res, 400, { ok: false, error: 'status must be Offer or Rejected' });
-  }
-  if (!Number.isInteger(rowIndex) || rowIndex < 0) {
-    return sendJSON(res, 400, { ok: false, error: 'rowIndex must be a non-negative integer' });
-  }
+async function calendarUpdate(req, res) {
+  const body = await readJSONBody(req);
+  if (!Number.isInteger(body.followUpRowIndex) || !DATE_RE.test(body.date) || !TIME_RE.test(body.time) || !String(body.event_type || '').trim()) return sendError(res, 400, 'Invalid calendar event');
+  const { header, dataRows } = readCSVRows(FOLLOW_UP_PATH);
+  const target = dataRows[body.followUpRowIndex];
+  if (!target || target[header.indexOf('company')] !== body.company || target[header.indexOf('job_title')] !== body.job_title) return sendError(res, 409, 'Calendar data changed; refresh and try again');
+  const job = locateJobRow(body.jobRowIndex, body.company, body.job_title);
+  for (const [key, value] of [['date', body.date], ['time', body.time], ['event_type', body.event_type.trim()]]) target[header.indexOf(key)] = value;
+  job.target[job.stageCol] = body.event_type.trim();
+  writeCSVRows(FOLLOW_UP_PATH, header, dataRows);
+  writeCSVRows(JOB_POOL_PATH, job.header, job.dataRows);
+  sendJSON(res, 200, { ok: true, current_stage: body.event_type.trim() });
+}
 
-  let header, dataRows;
-  try {
-    ({ header, dataRows } = readCSVRows(JOB_POOL_PATH));
-  } catch (e) {
-    return sendJSON(res, 500, { ok: false, error: 'Could not read job_pool.csv: ' + e.message });
-  }
-
-  const companyCol = header.indexOf('company');
-  const titleCol = header.indexOf('job_title');
-  const statusCol = header.indexOf('status');
-
-  if (statusCol === -1 || companyCol === -1 || titleCol === -1) {
-    return sendJSON(res, 500, { ok: false, error: 'job_pool.csv is missing an expected column' });
-  }
-  if (rowIndex >= dataRows.length) {
-    return sendJSON(res, 409, { ok: false, error: 'rowIndex out of range — the file may have changed, please refresh' });
-  }
-
-  const target = dataRows[rowIndex];
-  // job_pool.csv may have been rewritten (e.g. by the agent) between page
-  // load and this click, which would shift row positions — confirm the row
-  // at this index is still the same job before overwriting its status.
-  if (target[companyCol] !== company || target[titleCol] !== job_title) {
-    return sendJSON(res, 409, { ok: false, error: 'This row no longer matches — the dashboard data changed, please refresh and try again' });
-  }
-
-  target[statusCol] = status;
-
-  try {
-    writeCSVRows(JOB_POOL_PATH, header, dataRows);
-  } catch (e) {
-    return sendJSON(res, 500, { ok: false, error: 'Could not write job_pool.csv: ' + e.message });
-  }
-
+async function calendarDelete(req, res) {
+  const body = await readJSONBody(req);
+  if (!Number.isInteger(body.followUpRowIndex)) return sendError(res, 400, 'Invalid calendar event');
+  const { header, dataRows } = readCSVRows(FOLLOW_UP_PATH);
+  const target = dataRows[body.followUpRowIndex];
+  const matches = (key, value) => target && target[header.indexOf(key)] === value;
+  if (!matches('company', body.company) || !matches('job_title', body.job_title) || !matches('date', body.date) || !matches('time', body.time) || !matches('event_type', body.event_type)) return sendError(res, 409, 'Calendar data changed; refresh and try again');
+  dataRows.splice(body.followUpRowIndex, 1);
+  writeCSVRows(FOLLOW_UP_PATH, header, dataRows);
   sendJSON(res, 200, { ok: true });
 }
 
-// Locate + verify a job_pool.csv row by index, checking it still matches the
-// company/job_title the client last saw (same staleness guard as above).
-// Returns { header, dataRows, companyCol, titleCol, stageCol, target } or
-// throws an Error with an httpStatus property for the caller to relay.
-function locateJobRow(jobRowIndex, company, job_title) {
-  if (!Number.isInteger(jobRowIndex) || jobRowIndex < 0) {
-    const e = new Error('jobRowIndex must be a non-negative integer'); e.httpStatus = 400; throw e;
-  }
-  let header, dataRows;
-  try {
-    ({ header, dataRows } = readCSVRows(JOB_POOL_PATH));
-  } catch (err) {
-    const e = new Error('Could not read job_pool.csv: ' + err.message); e.httpStatus = 500; throw e;
-  }
-  const companyCol = header.indexOf('company');
-  const titleCol = header.indexOf('job_title');
-  const statusCol = header.indexOf('status');
-  const stageCol = header.indexOf('current_stage');
-  if ([companyCol, titleCol, statusCol, stageCol].includes(-1)) {
-    const e = new Error('job_pool.csv is missing an expected column (company/job_title/status/current_stage)'); e.httpStatus = 500; throw e;
-  }
-  if (jobRowIndex >= dataRows.length) {
-    const e = new Error('jobRowIndex out of range — the file may have changed, please refresh'); e.httpStatus = 409; throw e;
-  }
-  const target = dataRows[jobRowIndex];
-  if (target[companyCol] !== company || target[titleCol] !== job_title) {
-    const e = new Error('This job row no longer matches — the dashboard data changed, please refresh and try again'); e.httpStatus = 409; throw e;
-  }
-  if (target[statusCol] !== 'Submitted') {
-    const e = new Error('This job is not in the Submitted/Applied bucket — calendar events are only for already-applied jobs'); e.httpStatus = 409; throw e;
-  }
-  return { header, dataRows, statusCol, stageCol, target };
+const POSTDOC_COLUMNS = [
+  'id', 'pi_group', 'institute', 'country_region', 'research_fit', 'funding_status',
+  'opportunity_type', 'position_title', 'source_url', 'status', 'contacted_date',
+  'reply_summary', 'interview_date', 'research_statement_status',
+  'reference_letters_status', 'follow_up_date', 'next_action', 'notes', 'last_verified',
+];
+const POSTDOC_STATUSES = ['Prospect', 'Open position', 'Cold email planned', 'Contacted', 'Replied', 'Interview', 'Offer', 'Closed'];
+
+function postdocsAsObjects() {
+  const { header, dataRows } = readCSVRows(POSTDOC_PATH);
+  return dataRows.map(row => Object.fromEntries(header.map((key, index) => [key, row[index] || ''])));
 }
 
-async function handleCalendarAdd(req, res) {
-  let payload;
-  try {
-    payload = await readJSONBody(req);
-  } catch (e) {
-    return sendJSON(res, 400, { ok: false, error: e.message });
-  }
-
-  const { jobRowIndex, company, job_title, date, time, event_type } = payload || {};
-  if (!DATE_RE.test(date)) return sendJSON(res, 400, { ok: false, error: 'date must be YYYY-MM-DD' });
-  if (!TIME_RE.test(time)) return sendJSON(res, 400, { ok: false, error: 'time must be HH:MM' });
-  if (typeof event_type !== 'string' || !event_type.trim()) {
-    return sendJSON(res, 400, { ok: false, error: 'event_type is required' });
-  }
-
-  let jobRow;
-  try {
-    jobRow = locateJobRow(jobRowIndex, company, job_title);
-  } catch (e) {
-    return sendJSON(res, e.httpStatus || 500, { ok: false, error: e.message });
-  }
-
-  // current_stage is the event content verbatim — no auto-suffix. Every
-  // company's process reads differently, so don't guess a shared phrasing
-  // convention on top of what the user typed.
-  const stage = event_type.trim();
-  jobRow.target[jobRow.stageCol] = stage;
-
-  let fuHeader, fuDataRows;
-  try {
-    ({ header: fuHeader, dataRows: fuDataRows } = readCSVRows(FOLLOW_UP_PATH));
-  } catch (e) {
-    return sendJSON(res, 500, { ok: false, error: 'Could not read follow_up.csv: ' + e.message });
-  }
-  const cols = ['date', 'company', 'job_title', 'contact', 'channel', 'event_type', 'deadline', 'next_action', 'status', 'notes', 'time'];
-  if (cols.some(c => fuHeader.indexOf(c) === -1)) {
-    return sendJSON(res, 500, { ok: false, error: 'follow_up.csv is missing an expected column' });
-  }
-  const newRow = new Array(fuHeader.length).fill('');
-  newRow[fuHeader.indexOf('date')] = date;
-  newRow[fuHeader.indexOf('company')] = company;
-  newRow[fuHeader.indexOf('job_title')] = job_title;
-  newRow[fuHeader.indexOf('event_type')] = event_type.trim();
-  newRow[fuHeader.indexOf('status')] = 'Scheduled';
-  newRow[fuHeader.indexOf('time')] = time;
-  fuDataRows.push(newRow);
-  const followUpRowIndex = fuDataRows.length - 1;
-
-  try {
-    writeCSVRows(JOB_POOL_PATH, jobRow.header, jobRow.dataRows);
-    writeCSVRows(FOLLOW_UP_PATH, fuHeader, fuDataRows);
-  } catch (e) {
-    return sendJSON(res, 500, { ok: false, error: 'Could not write dashboard files: ' + e.message });
-  }
-
-  sendJSON(res, 200, { ok: true, followUpRowIndex, current_stage: stage });
+async function createPostdoc(req, res) {
+  const body = await readJSONBody(req);
+  if (!String(body.institute || '').trim()) return sendError(res, 422, 'Institute is required');
+  const { header, dataRows } = readCSVRows(POSTDOC_PATH);
+  const record = { ...body, id: crypto.randomUUID(), status: POSTDOC_STATUSES.includes(body.status) ? body.status : 'Prospect' };
+  const row = header.map(key => String(record[key] ?? '').trim());
+  dataRows.push(row);
+  writeCSVRows(POSTDOC_PATH, header, dataRows);
+  sendJSON(res, 201, { ok: true, postdoc: Object.fromEntries(header.map((key, index) => [key, row[index]])) });
 }
 
-async function handleCalendarUpdate(req, res) {
-  let payload;
-  try {
-    payload = await readJSONBody(req);
-  } catch (e) {
-    return sendJSON(res, 400, { ok: false, error: e.message });
+async function updatePostdoc(req, res, id) {
+  const body = await readJSONBody(req);
+  const { header, dataRows } = readCSVRows(POSTDOC_PATH);
+  const idCol = header.indexOf('id');
+  const row = dataRows.find(item => item[idCol] === id);
+  if (!row) return sendError(res, 404, 'Postdoc record not found');
+  for (const key of POSTDOC_COLUMNS) {
+    if (key === 'id' || !(key in body)) continue;
+    if (key === 'status' && !POSTDOC_STATUSES.includes(body[key])) return sendError(res, 422, 'Invalid postdoc status');
+    row[header.indexOf(key)] = String(body[key] ?? '').trim();
   }
-
-  const { followUpRowIndex, jobRowIndex, company, job_title, date, time, event_type } = payload || {};
-  if (!Number.isInteger(followUpRowIndex) || followUpRowIndex < 0) {
-    return sendJSON(res, 400, { ok: false, error: 'followUpRowIndex must be a non-negative integer' });
-  }
-  if (!DATE_RE.test(date)) return sendJSON(res, 400, { ok: false, error: 'date must be YYYY-MM-DD' });
-  if (!TIME_RE.test(time)) return sendJSON(res, 400, { ok: false, error: 'time must be HH:MM' });
-  if (typeof event_type !== 'string' || !event_type.trim()) {
-    return sendJSON(res, 400, { ok: false, error: 'event_type is required' });
-  }
-
-  let fuHeader, fuDataRows;
-  try {
-    ({ header: fuHeader, dataRows: fuDataRows } = readCSVRows(FOLLOW_UP_PATH));
-  } catch (e) {
-    return sendJSON(res, 500, { ok: false, error: 'Could not read follow_up.csv: ' + e.message });
-  }
-  const fuCompanyCol = fuHeader.indexOf('company');
-  const fuTitleCol = fuHeader.indexOf('job_title');
-  if (followUpRowIndex >= fuDataRows.length) {
-    return sendJSON(res, 409, { ok: false, error: 'This event no longer exists — the calendar may have changed, please refresh' });
-  }
-  const fuTarget = fuDataRows[followUpRowIndex];
-  if (fuTarget[fuCompanyCol] !== company || fuTarget[fuTitleCol] !== job_title) {
-    return sendJSON(res, 409, { ok: false, error: 'This event no longer matches — the calendar may have changed, please refresh' });
-  }
-
-  let jobRow;
-  try {
-    jobRow = locateJobRow(jobRowIndex, company, job_title);
-  } catch (e) {
-    return sendJSON(res, e.httpStatus || 500, { ok: false, error: e.message });
-  }
-
-  fuTarget[fuHeader.indexOf('date')] = date;
-  fuTarget[fuHeader.indexOf('time')] = time;
-  fuTarget[fuHeader.indexOf('event_type')] = event_type.trim();
-
-  // Same rule as add: current_stage is the event content verbatim.
-  const stage = event_type.trim();
-  jobRow.target[jobRow.stageCol] = stage;
-
-  try {
-    writeCSVRows(FOLLOW_UP_PATH, fuHeader, fuDataRows);
-    writeCSVRows(JOB_POOL_PATH, jobRow.header, jobRow.dataRows);
-  } catch (e) {
-    return sendJSON(res, 500, { ok: false, error: 'Could not write dashboard files: ' + e.message });
-  }
-
-  sendJSON(res, 200, { ok: true, current_stage: stage });
+  writeCSVRows(POSTDOC_PATH, header, dataRows);
+  sendJSON(res, 200, { ok: true, postdoc: Object.fromEntries(header.map((key, index) => [key, row[index] || ''])) });
 }
 
-async function handleCalendarDelete(req, res) {
-  let payload;
-  try {
-    payload = await readJSONBody(req);
-  } catch (e) {
-    return sendJSON(res, 400, { ok: false, error: e.message });
-  }
-
-  const { followUpRowIndex, company, job_title, event_type, date, time } = payload || {};
-  if (!Number.isInteger(followUpRowIndex) || followUpRowIndex < 0) {
-    return sendJSON(res, 400, { ok: false, error: 'followUpRowIndex must be a non-negative integer' });
-  }
-
-  let fuHeader, fuDataRows;
-  try {
-    ({ header: fuHeader, dataRows: fuDataRows } = readCSVRows(FOLLOW_UP_PATH));
-  } catch (e) {
-    return sendJSON(res, 500, { ok: false, error: 'Could not read follow_up.csv: ' + e.message });
-  }
-  if (followUpRowIndex >= fuDataRows.length) {
-    return sendJSON(res, 409, { ok: false, error: 'This event no longer exists — the calendar may have changed, please refresh' });
-  }
-  const fuTarget = fuDataRows[followUpRowIndex];
-  const matches = (col, val) => fuTarget[fuHeader.indexOf(col)] === val;
-  if (!matches('company', company) || !matches('job_title', job_title) || !matches('event_type', event_type) || !matches('date', date) || !matches('time', time)) {
-    return sendJSON(res, 409, { ok: false, error: 'This event no longer matches — the calendar may have changed, please refresh' });
-  }
-
-  fuDataRows.splice(followUpRowIndex, 1);
-
-  try {
-    writeCSVRows(FOLLOW_UP_PATH, fuHeader, fuDataRows);
-  } catch (e) {
-    return sendJSON(res, 500, { ok: false, error: 'Could not write follow_up.csv: ' + e.message });
-  }
-
-  // Deliberately does not revert job_pool.csv's current_stage — there's no
-  // reliable "previous stage" to roll back to. Edit the stage manually if
-  // deleting this event should also change what's shown on the job card.
-  sendJSON(res, 200, { ok: true });
+async function putProfile(req, res) {
+  const profile = await readJSONBody(req);
+  const errors = validateProfile(profile);
+  if (errors.length) return sendError(res, 422, 'Profile validation failed', errors);
+  writeJSON(PROFILE_PATH, { ...profile, schema_version: 1, last_updated: new Date().toISOString().slice(0, 10) });
+  const state = loadState();
+  persistDerived(state);
+  sendJSON(res, 200, { ok: true, profile: state.profile, readiness: state.readiness });
 }
 
-const ROUTES = {
-  '/api/update-status': handleUpdateStatus,
-  '/api/calendar/add': handleCalendarAdd,
-  '/api/calendar/update': handleCalendarUpdate,
-  '/api/calendar/delete': handleCalendarDelete,
-};
+async function putPreferences(req, res) {
+  const update = await readJSONBody(req);
+  const current = readJSON(PREFERENCES_PATH, {});
+  const preferences = { ...current, ...update, schema_version: 1 };
+  preferences.application_authorized = false;
+  preferences.final_submission_requires_approval = true;
+  writeJSON(PREFERENCES_PATH, preferences);
+  const state = loadState();
+  persistDerived(state);
+  sendJSON(res, 200, { ok: true, preferences: state.preferences, readiness: state.readiness });
+}
 
-const server = http.createServer((req, res) => {
-  const urlPath = decodeURIComponent(req.url.split('?')[0]);
+async function completeOnboarding(req, res) {
+  await readJSONBody(req);
+  const state = loadState();
+  persistDerived(state, { completed: state.readiness.lead_finding_ready, current_step: state.readiness.lead_finding_ready ? 6 : 0 });
+  if (!state.readiness.lead_finding_ready) return sendError(res, 422, 'Minimum setup is incomplete', state.readiness.missing.lead_finding);
+  sendJSON(res, 200, { ok: true, readiness: state.readiness });
+}
 
-  if (req.method === 'POST' && ROUTES[urlPath]) {
-    ROUTES[urlPath](req, res);
-    return;
-  }
+async function saveOnboarding(req, res) {
+  const body = await readJSONBody(req);
+  const currentStep = Number(body.current_step);
+  if (!Number.isInteger(currentStep) || currentStep < 0 || currentStep > 6) return sendError(res, 422, 'current_step must be between 0 and 6');
+  const state = loadState();
+  persistDerived(state, { current_step: currentStep, completed: state.readiness.lead_finding_ready });
+  sendJSON(res, 200, { ok: true, onboarding: readJSON(ONBOARDING_PATH, {}), readiness: state.readiness });
+}
 
-  if (req.method !== 'GET') {
-    res.writeHead(405);
-    res.end('Method not allowed');
-    return;
-  }
+function inspectMagic(filePath, ext) {
+  const fd = fs.openSync(filePath, 'r');
+  const buffer = Buffer.alloc(5);
+  fs.readSync(fd, buffer, 0, 5, 0);
+  fs.closeSync(fd);
+  if (ext === '.pdf') return buffer.subarray(0, 5).toString() === '%PDF-';
+  if (ext === '.docx') return buffer[0] === 0x50 && buffer[1] === 0x4b;
+  return false;
+}
 
-  const servedPath = urlPath === '/' ? '/dashboard.html' : urlPath;
-  const filePath = path.join(ROOT, servedPath);
+function uploadResume(req, res) {
+  let busboy;
+  try { busboy = Busboy({ headers: req.headers, limits: { files: 1, fileSize: MAX_RESUME_BYTES, fields: 10 } }); }
+  catch { return sendError(res, 400, 'Expected multipart/form-data'); }
 
-  // Prevent escaping the dashboard folder.
-  if (!filePath.startsWith(ROOT)) {
-    res.writeHead(403);
-    res.end('Forbidden');
-    return;
-  }
-
-  fs.readFile(filePath, (err, content) => {
-    if (err) {
-      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('Not found: ' + urlPath);
-      return;
+  const fields = {};
+  let upload = null;
+  let failed = null;
+  busboy.on('field', (name, value) => { fields[name] = value.slice(0, 1000); });
+  busboy.on('file', (name, stream, info) => {
+    if (name !== 'resume') { stream.resume(); return; }
+    const originalName = safeFilename(info.filename);
+    const ext = path.extname(originalName).toLowerCase();
+    const allowedMime = ext === '.pdf' ? 'application/pdf' : 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    if (!['.pdf', '.docx'].includes(ext) || (info.mimeType && info.mimeType !== allowedMime && info.mimeType !== 'application/octet-stream')) {
+      failed = 'Only genuine DOCX and PDF resumes are accepted'; stream.resume(); return;
     }
-    const ext = path.extname(filePath);
-    res.writeHead(200, {
-      'Content-Type': MIME[ext] || 'application/octet-stream',
-      'Cache-Control': 'no-store',
+    const id = crypto.randomUUID();
+    const storedName = `${id}-${originalName}`;
+    const tempPath = path.join(RESUME_FILES_ROOT, `${storedName}.uploading`);
+    const destination = path.join(RESUME_FILES_ROOT, storedName);
+    const writer = fs.createWriteStream(tempPath, { flags: 'wx' });
+    const writeDone = new Promise((resolve, reject) => {
+      writer.on('close', resolve);
+      writer.on('error', reject);
+      stream.on('error', reject);
     });
+    upload = { id, originalName, storedName, tempPath, destination, ext, mimeType: allowedMime, truncated: false, writeDone };
+    stream.on('limit', () => { upload.truncated = true; });
+    stream.pipe(writer);
+  });
+  busboy.on('error', error => sendError(res, 400, error.message));
+  busboy.on('finish', async () => {
+    try {
+      if (failed || !upload) throw Object.assign(new Error(failed || 'Resume file is required'), { status: 400 });
+      await upload.writeDone;
+      if (upload.truncated) throw Object.assign(new Error('Resume exceeds the 10 MB limit'), { status: 413 });
+      if (!inspectMagic(upload.tempPath, upload.ext)) throw Object.assign(new Error('File contents do not match the selected type'), { status: 415 });
+      fs.renameSync(upload.tempPath, upload.destination);
+      const parsed = await parseResume(upload.destination, upload.originalName);
+      const index = readJSON(RESUME_INDEX_PATH, []);
+      const item = {
+        id: upload.id, original_name: upload.originalName, stored_name: upload.storedName,
+        stored_path: path.relative(PROJECT_ROOT, upload.destination).replace(/\\/g, '/'),
+        mime_type: upload.mimeType, size: fs.statSync(upload.destination).size,
+        version: String(fields.version || upload.originalName).trim(),
+        role_families: String(fields.role_families || '').split(/[、,，/]+/).map(v => v.trim()).filter(Boolean),
+        use_when: String(fields.use_when || '').trim(), archived: false,
+        created_at: new Date().toISOString(), source: 'dashboard_upload',
+      };
+      index.push(item);
+      writeJSON(RESUME_INDEX_PATH, index);
+      const state = loadState();
+      persistDerived(state);
+      sendJSON(res, 201, { ok: true, resume: item, suggestions: parsed });
+    } catch (error) {
+      for (const candidate of [upload?.tempPath, upload?.destination]) {
+        if (candidate && fs.existsSync(candidate) && !readJSON(RESUME_INDEX_PATH, []).some(item => item.stored_name === path.basename(candidate))) fs.rmSync(candidate, { force: true });
+      }
+      sendError(res, error.status || 500, error.message);
+    }
+  });
+  req.pipe(busboy);
+}
+
+async function patchResume(req, res, id) {
+  const update = await readJSONBody(req);
+  const index = readJSON(RESUME_INDEX_PATH, []);
+  const item = index.find(entry => entry.id === id);
+  if (!item) return sendError(res, 404, 'Resume not found');
+  if ('version' in update) item.version = String(update.version).trim().slice(0, 120);
+  if ('role_families' in update) item.role_families = Array.isArray(update.role_families) ? update.role_families.map(String).map(v => v.trim()).filter(Boolean) : [];
+  if ('use_when' in update) item.use_when = String(update.use_when).trim().slice(0, 1000);
+  writeJSON(RESUME_INDEX_PATH, index);
+  const state = loadState(); persistDerived(state);
+  sendJSON(res, 200, { ok: true, resume: item, readiness: state.readiness });
+}
+
+function archiveResume(res, id) {
+  const index = readJSON(RESUME_INDEX_PATH, []);
+  const item = index.find(entry => entry.id === id);
+  if (!item) return sendError(res, 404, 'Resume not found');
+  item.archived = true; item.archived_at = new Date().toISOString();
+  writeJSON(RESUME_INDEX_PATH, index);
+  const state = loadState(); persistDerived(state);
+  sendJSON(res, 200, { ok: true, readiness: state.readiness });
+}
+
+async function routeApi(req, res, urlPath) {
+  const state = () => loadState();
+  if (req.method === 'GET' && urlPath === '/api/health') return sendJSON(res, 200, { ok: true, app: APP_NAME, version: APP_VERSION, data_directory: path.relative(PROJECT_ROOT, DATA_ROOT), readiness: state().readiness });
+  if (req.method === 'GET' && urlPath === '/api/profile') { const value = state(); return sendJSON(res, 200, { ok: true, profile: value.profile, readiness: value.readiness }); }
+  if (req.method === 'PUT' && urlPath === '/api/profile') return putProfile(req, res);
+  if (req.method === 'GET' && urlPath === '/api/preferences') { const value = state(); return sendJSON(res, 200, { ok: true, preferences: value.preferences, readiness: value.readiness }); }
+  if (req.method === 'PUT' && urlPath === '/api/preferences') return putPreferences(req, res);
+  if (req.method === 'GET' && urlPath === '/api/onboarding') { const value = state(); return sendJSON(res, 200, { ok: true, onboarding: readJSON(ONBOARDING_PATH, {}), readiness: value.readiness }); }
+  if (req.method === 'PUT' && urlPath === '/api/onboarding') return saveOnboarding(req, res);
+  if (req.method === 'POST' && urlPath === '/api/onboarding/complete') return completeOnboarding(req, res);
+  if (req.method === 'GET' && urlPath === '/api/resumes') { const value = state(); return sendJSON(res, 200, { ok: true, resumes: value.resumes, readiness: value.readiness }); }
+  if (req.method === 'POST' && urlPath === '/api/resumes') return uploadResume(req, res);
+  const resumeMatch = urlPath.match(/^\/api\/resumes\/([a-f0-9-]+)$/i);
+  if (req.method === 'PATCH' && resumeMatch) return patchResume(req, res, resumeMatch[1]);
+  const archiveMatch = urlPath.match(/^\/api\/resumes\/([a-f0-9-]+)\/archive$/i);
+  if (req.method === 'POST' && archiveMatch) return archiveResume(res, archiveMatch[1]);
+  if (req.method === 'GET' && urlPath === '/api/postdocs') return sendJSON(res, 200, { ok: true, postdocs: postdocsAsObjects(), statuses: POSTDOC_STATUSES });
+  if (req.method === 'POST' && urlPath === '/api/postdocs') return createPostdoc(req, res);
+  const postdocMatch = urlPath.match(/^\/api\/postdocs\/([a-f0-9-]+)$/i);
+  if (req.method === 'PUT' && postdocMatch) return updatePostdoc(req, res, postdocMatch[1]);
+  if (req.method === 'POST' && urlPath === '/api/update-status') return updateStatus(req, res);
+  if (req.method === 'POST' && urlPath === '/api/calendar/add') return calendarAdd(req, res);
+  if (req.method === 'POST' && urlPath === '/api/calendar/update') return calendarUpdate(req, res);
+  if (req.method === 'POST' && urlPath === '/api/calendar/delete') return calendarDelete(req, res);
+  return false;
+}
+
+function serveStatic(res, urlPath) {
+  const servedPath = urlPath === '/' ? '/dashboard.html' : urlPath;
+  let filePath;
+  if (/^\/[a-z_]+\.csv$/i.test(servedPath)) filePath = path.join(DASHBOARD_DATA_ROOT, path.basename(servedPath));
+  else filePath = path.resolve(DASHBOARD_ROOT, `.${servedPath}`);
+  const allowed = filePath.startsWith(`${DASHBOARD_ROOT}${path.sep}`) || filePath.startsWith(`${DASHBOARD_DATA_ROOT}${path.sep}`) || filePath === path.join(DASHBOARD_ROOT, 'dashboard.html');
+  if (!allowed) { res.writeHead(403); return res.end('Forbidden'); }
+  fs.readFile(filePath, (error, content) => {
+    if (error) { res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('Not found'); }
+    res.writeHead(200, { 'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'X-Frame-Options': 'DENY' });
     res.end(content);
   });
+}
+
+const server = http.createServer(async (req, res) => {
+  const urlPath = decodeURIComponent(new URL(req.url, `http://${req.headers.host || 'localhost'}`).pathname);
+  try {
+    if (urlPath.startsWith('/api/')) {
+      const handled = await routeApi(req, res, urlPath);
+      if (handled === false && !res.headersSent) sendError(res, 404, 'API endpoint not found');
+      return;
+    }
+    if (req.method !== 'GET') return sendError(res, 405, 'Method not allowed');
+    serveStatic(res, urlPath);
+  } catch (error) {
+    if (!res.headersSent) sendError(res, error.status || 500, error.message);
+  }
 });
 
-// Bind to localhost only — this server can now write to job_pool.csv, so it
-// shouldn't be reachable from other devices on the network.
-server.listen(PORT, '127.0.0.1', () => {
-  console.log('Dashboard running / 仪表盘已启动: http://localhost:' + PORT + '/dashboard.html');
-  console.log('Keep this window open to keep serving; close it or press Ctrl+C to stop.');
-  console.log('保持这个窗口开着；关掉窗口或按 Ctrl+C 即可停止服务。');
+server.on('error', error => {
+  if (error.code === 'EADDRINUSE') console.error(`Port ${PORT} is already in use. Close the other program or the existing job_for_PHD server.`);
+  else console.error(error);
+  process.exitCode = 1;
 });
+
+server.listen(PORT, '127.0.0.1', () => {
+  console.log(`${APP_NAME} is running at http://localhost:${PORT}/dashboard.html`);
+  console.log('All candidate data stays in the local user-data directory.');
+});
+
+module.exports = { server, parseCSV, stringifyCSV };
