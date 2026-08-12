@@ -13,8 +13,10 @@ const {
 const { initializeData } = require('../src/migration');
 const { calculateReadiness, validateProfile } = require('../src/readiness');
 const { refreshCompatibility } = require('../src/compatibility');
-const { readJSON, writeJSON, atomicWrite, safeFilename } = require('../src/storage');
+const { readJSON, writeJSON, safeFilename } = require('../src/storage');
 const { parseResume } = require('../src/resume-parser');
+const { parseCSV, stringifyCSV, readCSVRows, writeCSVRows } = require('../src/csv');
+const { postdocPolicy, validatePostdocPreferences, validatePostdocRecord } = require('../src/postdoc-policy');
 
 const MAX_JSON_BYTES = 1024 * 1024;
 const MAX_RESUME_BYTES = 10 * 1024 * 1024;
@@ -79,39 +81,6 @@ function persistDerived(state, onboardingPatch = {}) {
     last_saved_at: new Date().toISOString(),
   });
   refreshCompatibility(state.profile, state.preferences, state.readiness, state.resumes);
-}
-
-function parseCSV(text) {
-  const rows = [];
-  let row = [], field = '', inQuotes = false;
-  for (let i = 0; i < text.length; i += 1) {
-    const c = text[i], next = text[i + 1];
-    if (inQuotes) {
-      if (c === '"' && next === '"') { field += '"'; i += 1; }
-      else if (c === '"') inQuotes = false;
-      else field += c;
-    } else if (c === '"') inQuotes = true;
-    else if (c === ',') { row.push(field); field = ''; }
-    else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
-    else if (c !== '\r') field += c;
-  }
-  if (field.length || row.length) { row.push(field); rows.push(row); }
-  while (rows.length && rows.at(-1).length === 1 && rows.at(-1)[0] === '') rows.pop();
-  return rows;
-}
-
-function stringifyCSV(rows) {
-  const field = value => `"${String(value ?? '').replace(/"/g, '""')}"`;
-  return `${rows.map(row => row.map(field).join(',')).join('\r\n')}\r\n`;
-}
-
-function readCSVRows(filePath) {
-  const rows = parseCSV(fs.readFileSync(filePath, 'utf8'));
-  return { header: rows[0] || [], dataRows: rows.slice(1) };
-}
-
-function writeCSVRows(filePath, header, dataRows) {
-  atomicWrite(filePath, stringifyCSV([header, ...dataRows]));
 }
 
 function locateJobRow(jobRowIndex, company, jobTitle) {
@@ -183,7 +152,8 @@ async function calendarDelete(req, res) {
 }
 
 const POSTDOC_COLUMNS = [
-  'id', 'pi_group', 'institute', 'country_region', 'research_fit', 'funding_status',
+  'id', 'pi_group', 'institute', 'country_region', 'matched_research_area',
+  'matched_target_institution', 'research_fit', 'funding_status',
   'opportunity_type', 'position_title', 'source_url', 'status', 'contacted_date',
   'reply_summary', 'interview_date', 'research_statement_status',
   'reference_letters_status', 'follow_up_date', 'next_action', 'notes', 'last_verified',
@@ -192,12 +162,19 @@ const POSTDOC_STATUSES = ['Prospect', 'Open position', 'Cold email planned', 'Co
 
 function postdocsAsObjects() {
   const { header, dataRows } = readCSVRows(POSTDOC_PATH);
-  return dataRows.map(row => Object.fromEntries(header.map((key, index) => [key, row[index] || ''])));
+  const preferences = readJSON(PREFERENCES_PATH, {});
+  return dataRows.map(row => {
+    const record = Object.fromEntries(header.map((key, index) => [key, row[index] || '']));
+    const policyErrors = validatePostdocRecord(record, preferences);
+    return { ...record, policy_compliant: policyErrors.length === 0, policy_errors: policyErrors };
+  });
 }
 
 async function createPostdoc(req, res) {
   const body = await readJSONBody(req);
   if (!String(body.institute || '').trim()) return sendError(res, 422, 'Institute is required');
+  const policyErrors = validatePostdocRecord(body, readJSON(PREFERENCES_PATH, {}));
+  if (policyErrors.length) return sendError(res, 422, 'Postdoc preference constraints failed', policyErrors);
   const { header, dataRows } = readCSVRows(POSTDOC_PATH);
   const record = { ...body, id: crypto.randomUUID(), status: POSTDOC_STATUSES.includes(body.status) ? body.status : 'Prospect' };
   const row = header.map(key => String(record[key] ?? '').trim());
@@ -208,10 +185,17 @@ async function createPostdoc(req, res) {
 
 async function updatePostdoc(req, res, id) {
   const body = await readJSONBody(req);
+  const statusOnly = Object.keys(body).every(key => key === 'status');
   const { header, dataRows } = readCSVRows(POSTDOC_PATH);
   const idCol = header.indexOf('id');
   const row = dataRows.find(item => item[idCol] === id);
   if (!row) return sendError(res, 404, 'Postdoc record not found');
+  const existing = Object.fromEntries(header.map((key, index) => [key, row[index] || '']));
+  const nextRecord = { ...existing, ...body };
+  if (!statusOnly) {
+    const policyErrors = validatePostdocRecord(nextRecord, readJSON(PREFERENCES_PATH, {}));
+    if (policyErrors.length) return sendError(res, 422, 'Postdoc preference constraints failed', policyErrors);
+  }
   for (const key of POSTDOC_COLUMNS) {
     if (key === 'id' || !(key in body)) continue;
     if (key === 'status' && !POSTDOC_STATUSES.includes(body[key])) return sendError(res, 422, 'Invalid postdoc status');
@@ -235,8 +219,11 @@ async function putPreferences(req, res) {
   const update = await readJSONBody(req);
   const current = readJSON(PREFERENCES_PATH, {});
   const preferences = { ...current, ...update, schema_version: 1 };
+  preferences.postdoc = { ...(current.postdoc || {}), ...(update.postdoc || {}), match_policy: 'strict' };
   preferences.application_authorized = false;
   preferences.final_submission_requires_approval = true;
+  const postdocErrors = validatePostdocPreferences(preferences);
+  if (postdocErrors.length) return sendError(res, 422, 'Postdoc preference validation failed', postdocErrors);
   writeJSON(PREFERENCES_PATH, preferences);
   const state = loadState();
   persistDerived(state);
@@ -374,7 +361,7 @@ async function routeApi(req, res, urlPath) {
   if (req.method === 'PATCH' && resumeMatch) return patchResume(req, res, resumeMatch[1]);
   const archiveMatch = urlPath.match(/^\/api\/resumes\/([a-f0-9-]+)\/archive$/i);
   if (req.method === 'POST' && archiveMatch) return archiveResume(res, archiveMatch[1]);
-  if (req.method === 'GET' && urlPath === '/api/postdocs') return sendJSON(res, 200, { ok: true, postdocs: postdocsAsObjects(), statuses: POSTDOC_STATUSES });
+  if (req.method === 'GET' && urlPath === '/api/postdocs') return sendJSON(res, 200, { ok: true, postdocs: postdocsAsObjects(), statuses: POSTDOC_STATUSES, policy: postdocPolicy(state().preferences) });
   if (req.method === 'POST' && urlPath === '/api/postdocs') return createPostdoc(req, res);
   const postdocMatch = urlPath.match(/^\/api\/postdocs\/([a-f0-9-]+)$/i);
   if (req.method === 'PUT' && postdocMatch) return updatePostdoc(req, res, postdocMatch[1]);

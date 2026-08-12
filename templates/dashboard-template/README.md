@@ -112,6 +112,8 @@ Dedicated postdoctoral opportunity pipeline. Do not mix prospects or cold-email 
 Fields:
 
 - `pi_group`, `institute`, `country_region`: PI/group and host institution.
+- `matched_research_area`: exact selection from the saved strict research-area allowlist.
+- `matched_target_institution`: exact selection from the saved institution allowlist when configured.
 - `research_fit`: evidence-based research alignment.
 - `funding_status`: funded, PI-funded, fellowship required, self-funded, or unknown.
 - `opportunity_type`: `open_position` or `cold_email`.
@@ -120,7 +122,7 @@ Fields:
 - `research_statement_status`, `reference_letters_status`.
 - `next_action`, `notes`, `last_verified`.
 
-Verify openings and funding on official institute, university, or research-group pages. A planned cold email is not a contact; a tracked PI is not an application.
+The saved postdoctoral research areas are hard constraints. Candidate skills, adjacent fields, and overlapping keywords do not widen them. Verify openings and funding on official institute, university, or research-group pages. A planned cold email is not a contact; a tracked PI is not an application.
 
 ## Counting Rules
 

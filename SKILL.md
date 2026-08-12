@@ -54,7 +54,9 @@ Use the normal job pipeline for company roles. Use `user-data/dashboard/postdoc_
 - Contacted PI, reply, interview, and follow-up state.
 - Research statement and reference-letter readiness.
 
-For postdoc research, prioritize official institute/university and group pages. CERN, PSI, GSI, DESY, universities, detector electronics, proton therapy, and instrumentation are suggestions, not claims that an opportunity exists. Verify every opening and funding statement before recording it. Never mark a cold-email prospect as applied or contacted until an actual message was sent by the user or with their explicit approval.
+When `preferences.postdoc.enabled` is true, every saved research area is a strict allowlist entry, not a soft preference. A postdoctoral lead must set `matched_research_area` to one of those exact saved entries before it may be added or edited. Do not infer a match from the candidate's skills, overlapping keywords, or an adjacent field. If target institutions are configured, `matched_target_institution` must likewise select one exact saved institution. Do not search, recommend, add, or retain out-of-scope postdoctoral leads unless the user first changes the saved preferences.
+
+For postdoc research, prioritize official institute/university and group pages. Generic examples such as CERN, PSI, GSI, DESY, universities, detector electronics, proton therapy, and instrumentation are documentation examples only; they never expand or override the user's strict allowlists and are not claims that an opportunity exists. Verify every opening and funding statement before recording it. Never mark a cold-email prospect as applied or contacted until an actual message was sent by the user or with their explicit approval.
 
 ### 3. Confirm the Company or Institute and Research the Opening
 

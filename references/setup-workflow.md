@@ -306,8 +306,12 @@ The first application trial should expose permission, upload, dropdown, session,
 For postdoctoral opportunities, record each PI/group or public opening in `user-data/dashboard/postdoc_pipeline.csv` with:
 
 - PI/group, institute, country/region, and research fit.
+- `matched_research_area`, chosen exactly from the saved `preferences.postdoc.research_areas` allowlist.
+- `matched_target_institution`, chosen exactly from the saved target-institution allowlist whenever that list is not empty.
 - Funding status and whether the opportunity is an open position or a cold-email prospect.
 - Contacted, replied, interview, and follow-up state.
 - Research-statement and reference-letter readiness.
 
-Verify openings and funding on official institute, university, or group pages. CERN, PSI, GSI, DESY, universities, detector electronics, proton therapy, and instrumentation are search presets only. Never claim an opening exists until it is verified. Never mark a PI as contacted until a real message was sent with user approval.
+Saved postdoctoral research areas are hard constraints. Candidate skills, overlapping words, and adjacent fields must never be used to widen them. If the workflow is enabled but no research area is configured, stop postdoctoral search and ask the user to configure one. Generic names such as CERN, PSI, GSI, DESY, universities, detector electronics, proton therapy, and instrumentation are examples only and never override saved constraints.
+
+Verify openings and funding on official institute, university, or group pages. Never claim an opening exists until it is verified. Never mark a PI as contacted until a real message was sent with user approval.

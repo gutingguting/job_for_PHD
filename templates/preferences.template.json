@@ -12,6 +12,7 @@
     "enabled": false,
     "target_institutions": [],
     "research_areas": [],
+    "match_policy": "strict",
     "opportunity_modes": ["open_position", "cold_email"],
     "funding_preferences": []
   }

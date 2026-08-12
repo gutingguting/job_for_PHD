@@ -15,6 +15,8 @@ function refreshCompatibility(profile, preferences, readiness, resumeIndex) {
 
   const targets = profile.targets || {};
   const auth = profile.work_authorization || {};
+  const postdoc = preferences.postdoc || {};
+  const postdocEnabled = postdoc.enabled === true;
   const rules = `# job_for_PHD Application Rules
 
 Status: ${readiness.state}. Final submission requires explicit user approval.
@@ -36,6 +38,22 @@ ${bullets(targets.roles_to_avoid)}
 ## Location
 
 ${bullets(targets.target_locations)}
+
+## Postdoctoral hard constraints
+
+- Workflow enabled: **${postdocEnabled ? 'yes' : 'no'}**
+- Matching policy: **strict allowlist**
+- A postdoctoral lead must explicitly select one saved research area. Related skills, keywords, candidate experience, and adjacent fields do not count as a match.
+- If target institutions are configured, a lead must also explicitly select one saved target institution.
+- Do not add, retain, recommend, or search adjacent postdoctoral directions unless the user first changes these saved preferences.
+
+### Allowed research areas
+
+${bullets(postdoc.research_areas, postdocEnabled ? '未配置；停止博士后搜索并请用户设置' : '博士后工作流未启用')}
+
+### Allowed target institutions
+
+${bullets(postdoc.target_institutions, '未限定机构')}
 
 ## Work authorization
 

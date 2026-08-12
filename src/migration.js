@@ -9,6 +9,7 @@ const {
 const { ensureDir, readJSON, writeJSON, copyIfMissing, safeFilename } = require('./storage');
 const { calculateReadiness } = require('./readiness');
 const { refreshCompatibility } = require('./compatibility');
+const { ensureCSVColumns } = require('./csv');
 
 const DASHBOARD_FILES = [
   'application_log.csv', 'automation_rules.csv', 'blocker_queue.csv',
@@ -68,6 +69,7 @@ function defaultPreferences() {
       enabled: false,
       target_institutions: [],
       research_areas: [],
+      match_policy: 'strict',
       opportunity_modes: ['open_position', 'cold_email'],
       funding_preferences: [],
     },
@@ -127,7 +129,7 @@ function initializeData() {
     writeJSON(PREFERENCES_PATH, {
       ...defaults,
       ...current,
-      postdoc: { ...defaults.postdoc, ...(current.postdoc || {}) },
+      postdoc: { ...defaults.postdoc, ...(current.postdoc || {}), match_policy: 'strict' },
     });
   }
 
@@ -141,6 +143,10 @@ function initializeData() {
     const templateSource = path.join(PROJECT_ROOT, 'templates', 'dashboard-template', name);
     copyIfMissing(fs.existsSync(liveSource) ? liveSource : templateSource, path.join(DASHBOARD_DATA_ROOT, name));
   }
+  const postdocPath = path.join(DASHBOARD_DATA_ROOT, 'postdoc_pipeline.csv');
+  ensureCSVColumns(postdocPath, [
+    'matched_research_area', 'matched_target_institution',
+  ]);
 
   const profile = readJSON(PROFILE_PATH, defaultProfile());
   const preferences = readJSON(PREFERENCES_PATH, defaultPreferences());
