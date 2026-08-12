@@ -10,7 +10,7 @@ const RESUME_FILES_ROOT = path.join(RESUME_ROOT, 'files');
 
 module.exports = {
   APP_NAME: 'job_for_PHD',
-  APP_VERSION: '1.1.0',
+  APP_VERSION: '1.1.1',
   PORT: Number(process.env.JOB_FOR_PHD_PORT || 8420),
   PROJECT_ROOT,
   DASHBOARD_ROOT,

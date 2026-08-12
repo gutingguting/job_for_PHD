@@ -4,6 +4,7 @@ import { PostdocPipeline } from './postdoc.js';
 
 const escapeHTML = value => String(value ?? '').replace(/[&<>"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char]);
 const state = { jobs: [], followups: [], readiness: null, activeView: 'dashboard' };
+const FRONTEND_VERSION = '1.1.1';
 let toastTimer;
 
 function toast(message, error = false) {
@@ -99,6 +100,10 @@ const profile = new ProfileCenter({ toast, onReadiness: updateReadiness, navigat
 
 async function initialize() {
   try {
+    const health = await api.health();
+    if (health.version !== FRONTEND_VERSION) {
+      throw new Error(`服务版本不一致：网页为 v${FRONTEND_VERSION}，后台为 v${health.version || '未知'}。请关闭旧服务窗口并重新启动。`);
+    }
     const [, readiness] = await Promise.all([loadOperationalData(), profile.load(), postdoc.load()]);
     updateReadiness(readiness);
     document.getElementById('loading-view').classList.add('hidden');

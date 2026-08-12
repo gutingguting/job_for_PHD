@@ -43,7 +43,7 @@ export class PostdocPipeline {
     const response = await api.postdocs();
     this.items = response.postdocs;
     this.statuses = response.statuses;
-    this.policy = response.policy;
+    this.policy = response.policy || { enabled: false, research_areas: [], target_institutions: [] };
     this.renderPolicy();
     const filters = document.getElementById('postdoc-filter');
     const statusInput = document.getElementById('postdoc-status');
