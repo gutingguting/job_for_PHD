@@ -1,1 +1,1 @@
-date,company,job_title,contact,channel,event_type,deadline,next_action,status,notes,time
+date,company,job_title,contact,channel,event_type,deadline,next_action,status,notes,time,id,pipeline_type,record_id,end_time,timezone,location,meeting_url,source_type,source_id,outlook_event_id,outlook_sync_status

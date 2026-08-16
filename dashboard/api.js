@@ -27,8 +27,17 @@ export const api = {
   postdocs: () => request('/api/postdocs'),
   createPostdoc: value => request('/api/postdocs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }),
   updatePostdoc: (id, value) => request(`/api/postdocs/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }),
+  updateJob: (id, value) => request(`/api/jobs/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }),
   updateJobStatus: value => request('/api/update-status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }),
   calendar: (action, value) => request(`/api/calendar/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }),
+  outlookStatus: () => request('/api/outlook/status'),
+  outlookConnect: value => request('/api/outlook/connect', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }),
+  outlookDisconnect: () => request('/api/outlook/disconnect', { method: 'POST' }),
+  outlookSync: () => request('/api/outlook/sync', { method: 'POST' }),
+  mailReviews: () => request('/api/mail-review'),
+  confirmMailReview: (id, value) => request(`/api/mail-review/${id}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }),
+  dismissMailReview: id => request(`/api/mail-review/${id}/dismiss`, { method: 'POST' }),
+  retryOutlook: id => request(`/api/follow-ups/${id}/retry-outlook`, { method: 'POST' }),
 };
 
 export function parseCSV(text) {

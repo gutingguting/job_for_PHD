@@ -4,9 +4,9 @@ const crypto = require('crypto');
 const {
   PROJECT_ROOT, DATA_ROOT, AGENT_ROOT, DASHBOARD_DATA_ROOT,
   RESUME_ROOT, RESUME_FILES_ROOT, PROFILE_PATH, PREFERENCES_PATH,
-  ONBOARDING_PATH, RESUME_INDEX_PATH,
+  ONBOARDING_PATH, RESUME_INDEX_PATH, INTEGRATIONS_ROOT, MAIL_ROOT,
 } = require('./config');
-const { ensureDir, readJSON, writeJSON, copyIfMissing, safeFilename } = require('./storage');
+const { ensureDir, readJSON, writeJSON, copyIfMissing, timestampBackup, safeFilename } = require('./storage');
 const { calculateReadiness } = require('./readiness');
 const { refreshCompatibility } = require('./compatibility');
 const { ensureCSVColumns } = require('./csv');
@@ -14,7 +14,7 @@ const { ensureCSVColumns } = require('./csv');
 const DASHBOARD_FILES = [
   'application_log.csv', 'automation_rules.csv', 'blocker_queue.csv',
   'daily_dashboard.csv', 'follow_up.csv', 'job_pool.csv', 'resume_rules.csv',
-  'postdoc_pipeline.csv',
+  'postdoc_pipeline.csv', 'status_history.csv',
 ];
 const LEGACY_AGENT_FILES = [
   'answer_bank.md', 'experience_bank.md', 'application_rules.md',
@@ -23,7 +23,7 @@ const LEGACY_AGENT_FILES = [
 
 function defaultProfile() {
   return {
-    schema_version: 1,
+    schema_version: 2,
     candidate: {
       legal_name: '', preferred_name: '', english_name: '', email: '', phone: '',
       current_location: '', linkedin_url: '', portfolio_url: '', github_url: '',
@@ -43,6 +43,7 @@ function defaultProfile() {
       roles_to_avoid: [], target_industries: [], industries_to_avoid: [],
       target_company_stage: [], target_locations: [],
       remote_hybrid_onsite_preference: '', relocation_policy: '', target_level: '',
+      special_requirements: '',
     },
     compensation: { base_salary_range: '', total_compensation_range: '', answer_strategy: '', notes: '' },
     voluntary_self_identification: { strategy: 'prefer_not_to_say', fill_automatically: false },
@@ -56,7 +57,7 @@ function defaultProfile() {
 
 function defaultPreferences() {
   return {
-    schema_version: 1,
+    schema_version: 2,
     resume_mode: 'Volume',
     trial_boundary: 'lead_finding_only',
     self_identification_strategy: 'prefer_not_to_say',
@@ -74,6 +75,60 @@ function defaultPreferences() {
       funding_preferences: [],
     },
   };
+}
+
+function migrateProfile() {
+  const defaults = defaultProfile();
+  const current = readJSON(PROFILE_PATH, defaults);
+  if (Number(current.schema_version || 1) < 2) {
+    timestampBackup(PROFILE_PATH, path.join(DATA_ROOT, 'backups', 'v2'), 'schema-v2');
+  }
+  const profile = {
+    ...defaults,
+    ...current,
+    schema_version: 2,
+    candidate: { ...defaults.candidate, ...(current.candidate || {}) },
+    current_status: { ...defaults.current_status, ...(current.current_status || {}) },
+    work_authorization: { ...defaults.work_authorization, ...(current.work_authorization || {}) },
+    targets: { ...defaults.targets, ...(current.targets || {}) },
+    compensation: { ...defaults.compensation, ...(current.compensation || {}) },
+    voluntary_self_identification: { ...defaults.voluntary_self_identification, ...(current.voluntary_self_identification || {}) },
+  };
+  writeJSON(PROFILE_PATH, profile);
+  return profile;
+}
+
+function migrateDashboardSchema() {
+  const backupRoot = path.join(DATA_ROOT, 'backups', 'v2');
+  const jobPath = path.join(DASHBOARD_DATA_ROOT, 'job_pool.csv');
+  const followUpPath = path.join(DASHBOARD_DATA_ROOT, 'follow_up.csv');
+  const marker = path.join(backupRoot, '.dashboard-schema-v2');
+  if (!fs.existsSync(marker)) {
+    timestampBackup(jobPath, backupRoot, 'schema-v2');
+    timestampBackup(followUpPath, backupRoot, 'schema-v2');
+  }
+  ensureCSVColumns(jobPath, ['id', 'status_reason', 'last_status_updated']);
+  ensureCSVColumns(followUpPath, [
+    'id', 'pipeline_type', 'record_id', 'end_time', 'timezone', 'location',
+    'meeting_url', 'source_type', 'source_id', 'outlook_event_id', 'outlook_sync_status',
+  ]);
+
+  const { header, dataRows } = require('./csv').readCSVRows(jobPath);
+  const idCol = header.indexOf('id');
+  let changed = false;
+  for (const row of dataRows) {
+    if (!row[idCol]) { row[idCol] = crypto.randomUUID(); changed = true; }
+  }
+  if (changed) require('./csv').writeCSVRows(jobPath, header, dataRows);
+  const followUps = require('./csv').readCSVRows(followUpPath);
+  const followUpIdCol = followUps.header.indexOf('id');
+  let followUpsChanged = false;
+  for (const row of followUps.dataRows) {
+    if (row.some(Boolean) && !row[followUpIdCol]) { row[followUpIdCol] = crypto.randomUUID(); followUpsChanged = true; }
+  }
+  if (followUpsChanged) require('./csv').writeCSVRows(followUpPath, followUps.header, followUps.dataRows);
+  ensureDir(backupRoot);
+  if (!fs.existsSync(marker)) fs.writeFileSync(marker, `${new Date().toISOString()}\n`, 'utf8');
 }
 
 function resumeId(filePath) {
@@ -116,11 +171,11 @@ function migrateResumes(profile) {
 }
 
 function initializeData() {
-  [DATA_ROOT, AGENT_ROOT, DASHBOARD_DATA_ROOT, RESUME_ROOT, RESUME_FILES_ROOT].forEach(ensureDir);
+  [DATA_ROOT, AGENT_ROOT, DASHBOARD_DATA_ROOT, RESUME_ROOT, RESUME_FILES_ROOT, INTEGRATIONS_ROOT, MAIL_ROOT].forEach(ensureDir);
 
   if (!fs.existsSync(PROFILE_PATH)) {
     const legacy = readJSON(path.join(PROJECT_ROOT, 'candidate_profile.json'), null);
-    writeJSON(PROFILE_PATH, legacy || defaultProfile());
+    writeJSON(PROFILE_PATH, legacy ? { ...legacy, schema_version: Number(legacy.schema_version || 1) } : defaultProfile());
   }
   if (!fs.existsSync(PREFERENCES_PATH)) writeJSON(PREFERENCES_PATH, defaultPreferences());
   else {
@@ -129,6 +184,7 @@ function initializeData() {
     writeJSON(PREFERENCES_PATH, {
       ...defaults,
       ...current,
+      schema_version: 2,
       postdoc: { ...defaults.postdoc, ...(current.postdoc || {}), match_policy: 'strict' },
     });
   }
@@ -147,14 +203,15 @@ function initializeData() {
   ensureCSVColumns(postdocPath, [
     'matched_research_area', 'matched_target_institution',
   ]);
+  migrateDashboardSchema();
 
-  const profile = readJSON(PROFILE_PATH, defaultProfile());
+  const profile = migrateProfile();
   const preferences = readJSON(PREFERENCES_PATH, defaultPreferences());
   const resumes = migrateResumes(profile);
   const readiness = calculateReadiness(profile, preferences, resumes);
   const onboarding = readJSON(ONBOARDING_PATH, {});
   writeJSON(ONBOARDING_PATH, {
-    schema_version: 1,
+    schema_version: 2,
     completed: readiness.lead_finding_ready,
     current_step: readiness.lead_finding_ready ? 6 : Number(onboarding.current_step || 0),
     last_saved_at: onboarding.last_saved_at || new Date().toISOString(),
