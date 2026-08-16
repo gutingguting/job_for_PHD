@@ -110,6 +110,10 @@ Read `references/application-playbook.md` before operating browser-based applica
 
 Prefer uploading the resume first and letting the ATS auto-parse it — it's less error-prone than hand-typing education/experience. Fill whatever you confidently can from `candidate_profile.json`, `resume_routing.md`, `experience_bank.md` (for relevant-experience/self-evaluation fields, using the combo picked in step 5), and `answer_bank.md`. Stop and ask the user (don't guess) for anything on the `never_guess` list, anything requiring a subjective call, or anything the form surfaces that isn't backed by the résumé or profile (auto-filled bio text from a saved account, for instance) — verify it's true before letting it ride into a real submission.
 
+When the local prefill extension is available, use it as a user-triggered batch helper for Moka, Workday, and Greenhouse. Read `user-data/prefill/facts.json` and `question_bank.json` only through the local service. Importing a user-filled form may add confirmed non-sensitive wording to the answer bank, but conflicts must remain pending until the user chooses which value is correct. Never capture or fill government identifiers, date of birth, exact home address, health/demographic data, passwords, OTPs, CAPTCHA, consent checkboxes, cookies, or browser session data.
+
+Autofill completion is not submission evidence. The extension must stop after fill verification; the user performs the final submit click.
+
 Stop or hand off for CAPTCHA, Cloudflare, anti-bot checks, login or 2FA, unclear legal/identity questions, missing files, payment prompts, permission prompts, or anything that would require bypassing a site control.
 
 ### 9. Preview, User Confirms, Submit

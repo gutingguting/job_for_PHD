@@ -4,7 +4,8 @@ const crypto = require('crypto');
 const {
   PROJECT_ROOT, DATA_ROOT, AGENT_ROOT, DASHBOARD_DATA_ROOT,
   RESUME_ROOT, RESUME_FILES_ROOT, PROFILE_PATH, PREFERENCES_PATH,
-  ONBOARDING_PATH, RESUME_INDEX_PATH, INTEGRATIONS_ROOT, MAIL_ROOT,
+  ONBOARDING_PATH, RESUME_INDEX_PATH, INTEGRATIONS_ROOT, MAIL_ROOT, PREFILL_ROOT,
+  PREFILL_FACTS_PATH, PREFILL_QUESTIONS_PATH, PREFILL_IMPORTS_PATH, PREFILL_MAPPINGS_PATH,
 } = require('./config');
 const { ensureDir, readJSON, writeJSON, copyIfMissing, timestampBackup, safeFilename } = require('./storage');
 const { calculateReadiness } = require('./readiness');
@@ -171,7 +172,12 @@ function migrateResumes(profile) {
 }
 
 function initializeData() {
-  [DATA_ROOT, AGENT_ROOT, DASHBOARD_DATA_ROOT, RESUME_ROOT, RESUME_FILES_ROOT, INTEGRATIONS_ROOT, MAIL_ROOT].forEach(ensureDir);
+  [DATA_ROOT, AGENT_ROOT, DASHBOARD_DATA_ROOT, RESUME_ROOT, RESUME_FILES_ROOT, INTEGRATIONS_ROOT, MAIL_ROOT, PREFILL_ROOT].forEach(ensureDir);
+
+  if (!fs.existsSync(PREFILL_FACTS_PATH)) writeJSON(PREFILL_FACTS_PATH, { schema_version: 1, items: [] });
+  if (!fs.existsSync(PREFILL_QUESTIONS_PATH)) writeJSON(PREFILL_QUESTIONS_PATH, { schema_version: 1, items: [] });
+  if (!fs.existsSync(PREFILL_IMPORTS_PATH)) writeJSON(PREFILL_IMPORTS_PATH, { schema_version: 1, items: [] });
+  if (!fs.existsSync(PREFILL_MAPPINGS_PATH)) writeJSON(PREFILL_MAPPINGS_PATH, { schema_version: 1, items: [] });
 
   if (!fs.existsSync(PROFILE_PATH)) {
     const legacy = readJSON(path.join(PROJECT_ROOT, 'candidate_profile.json'), null);

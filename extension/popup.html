@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>job_for_PHD 预填写</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main>
+    <header><span class="mark">J</span><div><strong>job_for_PHD</strong><small>预填写助手 · v1.3.0</small></div></header>
+    <section id="pair-panel">
+      <h1>连接本地资料</h1>
+      <p>在 Dashboard 的“预填写中心”生成六位配对码。</p>
+      <form id="pair-form"><input id="pair-code" inputmode="numeric" maxlength="6" pattern="[0-9]{6}" placeholder="六位配对码" required><button>连接</button></form>
+    </section>
+    <section id="action-panel" hidden>
+      <div id="site-status" class="status">正在识别当前页面…</div>
+      <button id="import-btn" class="primary">导入当前已填表单</button>
+      <button id="fill-btn">一键预填当前页面</button>
+      <button id="disconnect-btn" class="link">断开本地连接</button>
+      <p class="boundary">不会读取密码、验证码、Cookie或敏感身份字段，也不会点击提交。</p>
+    </section>
+    <output id="result" hidden></output>
+  </main>
+  <script src="popup.js"></script>
+</body>
+</html>
