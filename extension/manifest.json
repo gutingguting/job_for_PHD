@@ -1,0 +1,12 @@
+{
+  "manifest_version": 3,
+  "name": "job_for_PHD 预填写助手",
+  "version": "1.3.0",
+  "description": "从本地 job_for_PHD 档案批量预填招聘表单；不会点击最终提交。",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["http://127.0.0.1:8420/*"],
+  "action": {
+    "default_title": "job_for_PHD 预填写助手",
+    "default_popup": "popup.html"
+  }
+}

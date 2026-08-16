@@ -38,6 +38,10 @@ export const api = {
   confirmMailReview: (id, value) => request(`/api/mail-review/${id}/confirm`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }),
   dismissMailReview: id => request(`/api/mail-review/${id}/dismiss`, { method: 'POST' }),
   retryOutlook: id => request(`/api/follow-ups/${id}/retry-outlook`, { method: 'POST' }),
+  prefill: () => request('/api/prefill'),
+  createPrefillPair: () => request('/api/prefill/pair', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'create' }) }),
+  savePrefill: value => request('/api/prefill', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }),
+  resolvePrefillConflicts: value => request('/api/prefill/resolve-conflicts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }),
 };
 
 export function parseCSV(text) {

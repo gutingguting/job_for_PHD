@@ -15,6 +15,7 @@
     </button>
     <nav aria-label="主导航">
       <button class="nav-link active" data-view-link="dashboard">岗位看板</button>
+      <button class="nav-link" data-view-link="prefill">预填写中心</button>
       <button class="nav-link" data-view-link="postdoc">博士后管线</button>
       <button class="nav-link" data-view-link="profile">资料中心 <span id="nav-readiness-dot" class="status-dot"></span></button>
     </nav>
@@ -33,7 +34,7 @@
     <section id="dashboard-view" class="app-view hidden">
       <article id="readiness-banner" class="readiness-banner">
         <div><p class="eyebrow">资料状态</p><h1 id="readiness-title">正在检查…</h1><p id="readiness-summary"></p></div>
-        <div class="banner-actions"><button class="button secondary" id="readiness-details">查看详情</button><button class="button primary" data-view-link="profile">继续完善资料</button></div>
+        <div class="banner-actions"><button class="button secondary" id="readiness-details">查看详情</button><button class="button secondary" data-view-link="prefill">预填写申请表</button><button class="button primary" data-view-link="profile">继续完善资料</button></div>
       </article>
 
       <div class="page-heading"><div><p class="eyebrow">JOB PIPELINE</p><h2>岗位进度</h2></div><p>只记录真实状态；保存岗位不等于已投递。</p></div>
@@ -84,6 +85,32 @@
         </form>
       </dialog>
       <datalist id="job-stage-suggestions"><option>已投递</option><option>测评</option><option>笔试</option><option>一面</option><option>二面</option><option>HR 面</option><option>终面</option><option>谈薪</option><option>背调</option></datalist>
+    </section>
+
+    <section id="prefill-view" class="app-view hidden">
+      <div class="page-heading"><div><p class="eyebrow">PREFILL CENTER</p><h1>预填写中心</h1></div><p>资料只在本机保存。浏览器扩展批量读取或填写当前表单，但永远不会点击最终提交。</p></div>
+      <section class="prefill-hero">
+        <div><p class="eyebrow">BROWSER BRIDGE</p><h2>连接浏览器扩展</h2><p>首次使用时生成六位配对码，在扩展弹窗中输入。配对码十分钟后失效。</p></div>
+        <div class="pairing-action"><strong id="prefill-pair-code">尚未生成</strong><button class="button primary" id="prefill-pair-btn">生成配对码</button></div>
+      </section>
+      <div class="metric-grid compact prefill-metrics">
+        <article class="metric-card"><span>可复用字段</span><strong id="prefill-fact-count">0</strong><small>已确认且非敏感</small></article>
+        <article class="metric-card"><span>确认问答</span><strong id="prefill-question-count">0</strong><small>可按企业与平台复用</small></article>
+        <article class="metric-card"><span>导入记录</span><strong id="prefill-import-count">0</strong><small>不保存完整网页</small></article>
+        <article class="metric-card accent"><span>待处理冲突</span><strong id="prefill-conflict-count">0</strong><small>不会静默覆盖档案</small></article>
+      </div>
+      <section class="surface">
+        <div class="section-heading"><div><p class="eyebrow">VERIFIED FACTS</p><h2>可复用字段</h2></div><button class="button primary" id="prefill-save-btn">保存修改</button></div>
+        <div id="prefill-facts" class="prefill-table"></div>
+      </section>
+      <section class="surface">
+        <div class="section-heading"><div><p class="eyebrow">ANSWER BANK</p><h2>用人单位问答</h2></div><p class="section-copy">保存后同步到 Agent 答案库。</p></div>
+        <div id="prefill-questions" class="prefill-table"></div>
+      </section>
+      <section class="surface">
+        <div class="section-heading"><div><p class="eyebrow">IMPORT HISTORY</p><h2>采集记录与冲突</h2></div></div>
+        <div id="prefill-imports" class="record-list"></div>
+      </section>
     </section>
 
     <section id="postdoc-view" class="app-view hidden">

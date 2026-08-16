@@ -1,10 +1,11 @@
 import { api, readCSV } from './api.js';
 import { ProfileCenter } from './profile-center.js';
 import { PostdocPipeline } from './postdoc.js';
+import { PrefillCenter } from './prefill-center.js';
 
 const escapeHTML = value => String(value ?? '').replace(/[&<>"]/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char]);
 const state = { jobs: [], followups: [], readiness: null, activeView: 'dashboard', outlook: null, mailReviews: [] };
-const FRONTEND_VERSION = '1.2.0';
+const FRONTEND_VERSION = '1.3.0';
 const JOB_STATUSES = ['Pending', 'Needs user', 'Submitted', 'Offer', 'Rejected', 'Skipped', 'Blocked'];
 let toastTimer;
 
@@ -215,6 +216,7 @@ async function loadOperationalData() {
 
 const postdoc = new PostdocPipeline({ toast, onCount: count => { document.getElementById('metric-postdoc').textContent = count; } });
 const profile = new ProfileCenter({ toast, onReadiness: updateReadiness, navigate });
+const prefill = new PrefillCenter({ toast });
 
 async function initialize() {
   try {
@@ -222,12 +224,12 @@ async function initialize() {
     if (health.version !== FRONTEND_VERSION) {
       throw new Error(`服务版本不一致：网页为 v${FRONTEND_VERSION}，后台为 v${health.version || '未知'}。请关闭旧服务窗口并重新启动。`);
     }
-    const [, readiness] = await Promise.all([loadOperationalData(), profile.load(), postdoc.load()]);
+    const [, readiness] = await Promise.all([loadOperationalData(), profile.load(), postdoc.load(), prefill.load()]);
     await loadOutlook();
     updateReadiness(readiness);
     document.getElementById('loading-view').classList.add('hidden');
     const requested = location.hash.slice(1);
-    navigate(!readiness.lead_finding_ready ? 'profile' : ['dashboard', 'postdoc', 'profile'].includes(requested) ? requested : 'dashboard');
+    navigate(!readiness.lead_finding_ready ? 'profile' : ['dashboard', 'prefill', 'postdoc', 'profile'].includes(requested) ? requested : 'dashboard');
   } catch (error) {
     document.querySelector('#loading-view h1').textContent = '本地服务未能完成初始化'; document.querySelector('#loading-view p').textContent = error.message; toast(error.message, true);
   }

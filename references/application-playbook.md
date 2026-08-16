@@ -44,6 +44,17 @@ Use the fastest reliable method first, then escalate only when needed:
 
 Playwright is an implementation detail, not the user-facing concept. Describe it to users as fast browser automation unless they ask for the technical details.
 
+### Local Prefill Extension
+
+For Moka, Workday, and Greenhouse, prefer the job_for_PHD extension when the user wants to reuse already confirmed answers. It runs only after the user clicks the extension, obtains temporary access to the active tab, and communicates with the local service through a paired token.
+
+- Use **Import current form** only after the user says the visible answers are theirs and correct.
+- Review profile conflicts in the Dashboard; do not overwrite silently.
+- Use **Prefill current page** to fill blank, unambiguous fields and then read values back.
+- Leave existing non-empty values unchanged unless the user edits them.
+- Sensitive identity fields, credentials, verification controls, CAPTCHA, consent, and final submission are always excluded.
+- Report filled, unchanged, ambiguous/skipped, sensitive-excluded, and rejected counts.
+
 ## The 10 Common Cardpoints
 
 ### 1. Permissions

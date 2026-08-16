@@ -19,6 +19,7 @@ const { parseCSV, stringifyCSV, readCSVRows, writeCSVRows } = require('../src/cs
 const { postdocPolicy, validatePostdocPreferences, validatePostdocRecord } = require('../src/postdoc-policy');
 const { JOB_STATUSES, updateJob } = require('../src/job-service');
 const outlook = require('../src/outlook-service');
+const prefill = require('../src/prefill-service');
 
 const MAX_JSON_BYTES = 1024 * 1024;
 const MAX_RESUME_BYTES = 10 * 1024 * 1024;
@@ -43,6 +44,23 @@ function sendJSON(res, status, value) {
 
 function sendError(res, status, message, details) {
   sendJSON(res, status, { ok: false, error: message, details });
+}
+
+function extensionId(req) {
+  const match = String(req.headers.origin || '').match(/^chrome-extension:\/\/([a-z]+)$/i);
+  return match?.[1] || '';
+}
+
+function bearerToken(req) {
+  const match = String(req.headers.authorization || '').match(/^Bearer\s+(.+)$/i);
+  return match?.[1] || '';
+}
+
+function requirePrefillExtension(req) {
+  const id = extensionId(req);
+  if (!id || !prefill.verifyToken(bearerToken(req), id)) {
+    throw Object.assign(new Error('预填写扩展尚未配对或令牌已过期'), { status: 401 });
+  }
 }
 
 function readJSONBody(req, maxBytes = MAX_JSON_BYTES) {
@@ -393,6 +411,35 @@ async function routeApi(req, res, urlPath) {
   if (req.method === 'POST' && reviewDismiss) return sendJSON(res, 200, { ok: true, review: outlook.dismissReview(reviewDismiss[1]) });
   const retryOutlook = urlPath.match(/^\/api\/follow-ups\/([a-f0-9-]+)\/retry-outlook$/i);
   if (req.method === 'POST' && retryOutlook) return sendJSON(res, 200, { ok: true, event: await outlook.retryFollowUp(retryOutlook[1]) });
+  if (req.method === 'POST' && urlPath === '/api/prefill/pair') {
+    const body = await readJSONBody(req);
+    if (body.action === 'create') {
+      if (extensionId(req)) return sendError(res, 403, '扩展不能创建配对码');
+      return sendJSON(res, 200, { ok: true, pairing: prefill.createPairingCode() });
+    }
+    if (body.action === 'exchange') {
+      const id = extensionId(req);
+      if (!id) return sendError(res, 403, '只能从浏览器扩展完成配对');
+      return sendJSON(res, 200, { ok: true, pairing: prefill.exchangePairingCode(body.code, id) });
+    }
+    return sendError(res, 400, '未知配对操作');
+  }
+  if (req.method === 'GET' && urlPath === '/api/prefill') return sendJSON(res, 200, { ok: true, ...prefill.readState() });
+  if (req.method === 'PUT' && urlPath === '/api/prefill') return sendJSON(res, 200, { ok: true, ...prefill.updateState(await readJSONBody(req)) });
+  if (req.method === 'POST' && urlPath === '/api/prefill/import') {
+    requirePrefillExtension(req);
+    return sendJSON(res, 201, { ok: true, import: prefill.importPage(await readJSONBody(req)) });
+  }
+  if (req.method === 'POST' && urlPath === '/api/prefill/resolve-conflicts') {
+    const result = prefill.resolveConflicts(await readJSONBody(req));
+    const next = state(); persistDerived(next);
+    return sendJSON(res, 200, { ok: true, ...result, readiness: next.readiness });
+  }
+  if (req.method === 'GET' && urlPath === '/api/prefill/bundle') {
+    requirePrefillExtension(req);
+    const requestUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+    return sendJSON(res, 200, { ok: true, bundle: prefill.bundleFor(requestUrl.searchParams.get('url') || '', requestUrl.searchParams.get('employer') || '') });
+  }
   return false;
 }
 
@@ -414,6 +461,17 @@ const server = http.createServer(async (req, res) => {
   const requestUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   const urlPath = decodeURIComponent(requestUrl.pathname);
   try {
+    const origin = String(req.headers.origin || '');
+    const localOrigin = /^https?:\/\/(?:127\.0\.0\.1|localhost):8420$/i.test(origin);
+    const extensionOrigin = /^chrome-extension:\/\/[a-z]+$/i.test(origin);
+    if (origin && !localOrigin && !extensionOrigin) return sendError(res, 403, 'Origin not allowed');
+    if (extensionOrigin) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Vary', 'Origin');
+      res.setHeader('Access-Control-Allow-Headers', 'Authorization, Content-Type');
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, OPTIONS');
+    }
+    if (req.method === 'OPTIONS') { res.writeHead(204); return res.end(); }
     if (req.method === 'GET' && urlPath === '/oauth/outlook/callback') {
       await outlook.completeConnect(requestUrl.searchParams);
       res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY' });
@@ -427,7 +485,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method !== 'GET') return sendError(res, 405, 'Method not allowed');
     serveStatic(res, urlPath);
   } catch (error) {
-    if (!res.headersSent) sendError(res, error.status || 500, error.message);
+    if (!res.headersSent) sendError(res, error.status || 500, error.message, error.details);
   }
 });
 

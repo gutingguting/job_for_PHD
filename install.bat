@@ -41,7 +41,10 @@ echo Initializing private local data...
 "%NODE_CMD%" scripts\init-data.js
 if errorlevel 1 goto :failed
 
-echo job_for_PHD is ready. Opening the local dashboard...
+echo job_for_PHD is ready.
+echo Optional prefill extension: %~dp0extension
+echo Load that folder from Chrome or Edge extensions page with Developer mode enabled.
+echo Opening the local dashboard...
 call dashboard\start-dashboard.bat
 exit /b %errorlevel%
 
