@@ -12,7 +12,7 @@ test('agent application rules expose postdoc preferences as strict constraints',
     return [file, fs.existsSync(file) ? fs.readFileSync(file) : null];
   }));
   try {
-    refreshCompatibility({ targets: {}, work_authorization: {} }, {
+    refreshCompatibility({ targets: { special_requirements: '不得投文职；优先医疗电子。' }, work_authorization: {} }, {
       postdoc: {
         enabled: true,
         research_areas: ['质子治疗的电子学相关岗位'],
@@ -24,6 +24,7 @@ test('agent application rules expose postdoc preferences as strict constraints',
     assert.match(rules, /质子治疗的电子学相关岗位/);
     assert.match(rules, /- PSI/);
     assert.match(rules, /adjacent fields do not count as a match/);
+    assert.match(rules, /不得投文职；优先医疗电子。/);
   } finally {
     for (const [file, content] of backups) {
       if (content === null) fs.rmSync(file, { force: true });

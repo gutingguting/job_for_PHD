@@ -72,6 +72,8 @@ When the user names a specific company (or you're evaluating one you found), wor
 
 Prioritize jobs by freshness, fit, feasibility, and conversion likelihood. Default to fresh jobs from the last 24 hours, then 48 hours if needed.
 
+Read the `Special requirements` section generated in `user-data/agent/application_rules.md` before every search or screening run. Apply explicit “必须 / 不得 / 优先” language literally. If a free-text requirement is ambiguous or conflicts with another saved rule, stop and ask instead of silently choosing an interpretation.
+
 Skip or defer roles that violate the user's rules, are clearly overleveled, are closed or duplicate, require unsupported work authorization, need missing materials, or involve long account-heavy flows with weak fit.
 
 ### 5. Shortlist Specific Positions and Let the User Choose
@@ -125,6 +127,8 @@ Every job lead or attempt must end in one of these states:
 - `Pending`: selected for later action because it appears worth reviewing or applying after known prerequisites are satisfied.
 
 Count only confirmed submissions. Saved jobs, trackers, autofill badges, or "quick apply" labels do not count.
+
+An interview email is follow-up evidence, not submission evidence. Never change a job to `Submitted` merely because an interview-looking email was detected; link it only after the user confirms the review item and the job already has real submission evidence.
 
 For a first trial or demo run, default to lead finding only: find, screen, classify, and update the dashboard without opening real application flows or submitting anything. In lead-finding-only runs, update `job_pool`, `daily_dashboard`, `blocker_queue`, and `automation_rules` as needed; leave `application_log` empty because no application attempt occurred.
 

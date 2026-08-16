@@ -6,6 +6,11 @@ function bullets(values, empty = '未配置') {
   return Array.isArray(values) && values.length ? values.map(v => `- ${v}`).join('\n') : `- ${empty}`;
 }
 
+function quotedText(value, empty = '未配置') {
+  const text = String(value || '').trim();
+  return text ? text.split(/\r?\n/).map(line => `> ${line}`).join('\n') : `> ${empty}`;
+}
+
 function refreshCompatibility(profile, preferences, readiness, resumeIndex) {
   writeJSON(path.join(AGENT_ROOT, 'candidate_profile.json'), {
     ...profile,
@@ -38,6 +43,12 @@ ${bullets(targets.roles_to_avoid)}
 ## Location
 
 ${bullets(targets.target_locations)}
+
+## Special requirements
+
+${quotedText(targets.special_requirements)}
+
+Treat the saved special requirements as part of the job-search target. Follow explicit words such as “必须”, “不得”, and “优先” literally; if the text is ambiguous, ask the user instead of inventing a constraint.
 
 ## Postdoctoral hard constraints
 

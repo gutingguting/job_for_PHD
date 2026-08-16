@@ -17,6 +17,8 @@ const { readJSON, writeJSON, safeFilename } = require('../src/storage');
 const { parseResume } = require('../src/resume-parser');
 const { parseCSV, stringifyCSV, readCSVRows, writeCSVRows } = require('../src/csv');
 const { postdocPolicy, validatePostdocPreferences, validatePostdocRecord } = require('../src/postdoc-policy');
+const { JOB_STATUSES, updateJob } = require('../src/job-service');
+const outlook = require('../src/outlook-service');
 
 const MAX_JSON_BYTES = 1024 * 1024;
 const MAX_RESUME_BYTES = 10 * 1024 * 1024;
@@ -100,9 +102,13 @@ async function updateStatus(req, res) {
   const body = await readJSONBody(req);
   if (!['Offer', 'Rejected'].includes(body.status)) return sendError(res, 400, 'status must be Offer or Rejected');
   const job = locateJobRow(body.rowIndex, body.company, body.job_title);
-  job.target[job.statusCol] = body.status;
-  writeCSVRows(JOB_POOL_PATH, job.header, job.dataRows);
-  sendJSON(res, 200, { ok: true });
+  const id = job.target[job.header.indexOf('id')];
+  sendJSON(res, 200, { ok: true, job: updateJob(id, { status: body.status }) });
+}
+
+async function patchJob(req, res, id) {
+  const body = await readJSONBody(req);
+  sendJSON(res, 200, { ok: true, job: updateJob(id, body), statuses: JOB_STATUSES });
 }
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -118,6 +124,8 @@ async function calendarAdd(req, res) {
   const set = (name, value) => { const col = header.indexOf(name); if (col >= 0) row[col] = value; };
   set('date', body.date); set('time', body.time); set('company', body.company);
   set('job_title', body.job_title); set('event_type', body.event_type.trim()); set('status', 'Scheduled');
+  set('id', crypto.randomUUID()); set('pipeline_type', 'job'); set('record_id', job.target[job.header.indexOf('id')]);
+  set('timezone', Intl.DateTimeFormat().resolvedOptions().timeZone || 'Asia/Shanghai'); set('outlook_sync_status', 'not_requested');
   dataRows.push(row);
   job.target[job.stageCol] = body.event_type.trim();
   writeCSVRows(FOLLOW_UP_PATH, header, dataRows);
@@ -207,9 +215,12 @@ async function updatePostdoc(req, res, id) {
 
 async function putProfile(req, res) {
   const profile = await readJSONBody(req);
+  profile.targets ||= {};
+  profile.targets.special_requirements = String(profile.targets.special_requirements || '').trim();
+  if (profile.targets.special_requirements.length > 4000) return sendError(res, 422, 'Special requirements must be 4000 characters or fewer');
   const errors = validateProfile(profile);
   if (errors.length) return sendError(res, 422, 'Profile validation failed', errors);
-  writeJSON(PROFILE_PATH, { ...profile, schema_version: 1, last_updated: new Date().toISOString().slice(0, 10) });
+  writeJSON(PROFILE_PATH, { ...profile, schema_version: 2, last_updated: new Date().toISOString().slice(0, 10) });
   const state = loadState();
   persistDerived(state);
   sendJSON(res, 200, { ok: true, profile: state.profile, readiness: state.readiness });
@@ -218,7 +229,7 @@ async function putProfile(req, res) {
 async function putPreferences(req, res) {
   const update = await readJSONBody(req);
   const current = readJSON(PREFERENCES_PATH, {});
-  const preferences = { ...current, ...update, schema_version: 1 };
+  const preferences = { ...current, ...update, schema_version: 2 };
   preferences.postdoc = { ...(current.postdoc || {}), ...(update.postdoc || {}), match_policy: 'strict' };
   preferences.application_authorized = false;
   preferences.final_submission_requires_approval = true;
@@ -365,10 +376,23 @@ async function routeApi(req, res, urlPath) {
   if (req.method === 'POST' && urlPath === '/api/postdocs') return createPostdoc(req, res);
   const postdocMatch = urlPath.match(/^\/api\/postdocs\/([a-f0-9-]+)$/i);
   if (req.method === 'PUT' && postdocMatch) return updatePostdoc(req, res, postdocMatch[1]);
+  const jobMatch = urlPath.match(/^\/api\/jobs\/([a-f0-9-]+)$/i);
+  if (req.method === 'PATCH' && jobMatch) return patchJob(req, res, jobMatch[1]);
   if (req.method === 'POST' && urlPath === '/api/update-status') return updateStatus(req, res);
   if (req.method === 'POST' && urlPath === '/api/calendar/add') return calendarAdd(req, res);
   if (req.method === 'POST' && urlPath === '/api/calendar/update') return calendarUpdate(req, res);
   if (req.method === 'POST' && urlPath === '/api/calendar/delete') return calendarDelete(req, res);
+  if (req.method === 'GET' && urlPath === '/api/outlook/status') return sendJSON(res, 200, { ok: true, outlook: outlook.status() });
+  if (req.method === 'POST' && urlPath === '/api/outlook/connect') return sendJSON(res, 200, { ok: true, ...(await outlook.beginConnect(await readJSONBody(req))) });
+  if (req.method === 'POST' && urlPath === '/api/outlook/disconnect') return sendJSON(res, 200, { ok: true, outlook: await outlook.disconnect() });
+  if (req.method === 'POST' && urlPath === '/api/outlook/sync') return sendJSON(res, 200, { ok: true, result: await outlook.sync(), outlook: outlook.status() });
+  if (req.method === 'GET' && urlPath === '/api/mail-review') return sendJSON(res, 200, { ok: true, reviews: outlook.reviews() });
+  const reviewConfirm = urlPath.match(/^\/api\/mail-review\/([a-f0-9-]+)\/confirm$/i);
+  if (req.method === 'POST' && reviewConfirm) return sendJSON(res, 200, { ok: true, ...(await outlook.confirmReview(reviewConfirm[1], await readJSONBody(req))) });
+  const reviewDismiss = urlPath.match(/^\/api\/mail-review\/([a-f0-9-]+)\/dismiss$/i);
+  if (req.method === 'POST' && reviewDismiss) return sendJSON(res, 200, { ok: true, review: outlook.dismissReview(reviewDismiss[1]) });
+  const retryOutlook = urlPath.match(/^\/api\/follow-ups\/([a-f0-9-]+)\/retry-outlook$/i);
+  if (req.method === 'POST' && retryOutlook) return sendJSON(res, 200, { ok: true, event: await outlook.retryFollowUp(retryOutlook[1]) });
   return false;
 }
 
@@ -387,8 +411,14 @@ function serveStatic(res, urlPath) {
 }
 
 const server = http.createServer(async (req, res) => {
-  const urlPath = decodeURIComponent(new URL(req.url, `http://${req.headers.host || 'localhost'}`).pathname);
+  const requestUrl = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
+  const urlPath = decodeURIComponent(requestUrl.pathname);
   try {
+    if (req.method === 'GET' && urlPath === '/oauth/outlook/callback') {
+      await outlook.completeConnect(requestUrl.searchParams);
+      res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store', 'X-Frame-Options': 'DENY' });
+      return res.end('<!doctype html><meta charset="utf-8"><title>Outlook 已连接</title><body style="font-family:system-ui;padding:40px"><h1>Outlook 已连接</h1><p>可以关闭此窗口并返回 job_for_PHD。</p><script>setTimeout(()=>window.close(),1200)</script></body>');
+    }
     if (urlPath.startsWith('/api/')) {
       const handled = await routeApi(req, res, urlPath);
       if (handled === false && !res.headersSent) sendError(res, 404, 'API endpoint not found');
@@ -410,6 +440,9 @@ server.on('error', error => {
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`${APP_NAME} is running at http://localhost:${PORT}/dashboard.html`);
   console.log('All candidate data stays in the local user-data directory.');
+  setTimeout(() => outlook.sync().catch(() => {}), 1500).unref();
 });
+
+setInterval(() => outlook.sync().catch(() => {}), 15 * 60 * 1000).unref();
 
 module.exports = { server, parseCSV, stringifyCSV };

@@ -7,10 +7,12 @@ const AGENT_ROOT = path.join(DATA_ROOT, 'agent');
 const DASHBOARD_DATA_ROOT = path.join(DATA_ROOT, 'dashboard');
 const RESUME_ROOT = path.join(DATA_ROOT, 'resumes');
 const RESUME_FILES_ROOT = path.join(RESUME_ROOT, 'files');
+const INTEGRATIONS_ROOT = path.join(DATA_ROOT, 'integrations');
+const MAIL_ROOT = path.join(DATA_ROOT, 'mail');
 
 module.exports = {
   APP_NAME: 'job_for_PHD',
-  APP_VERSION: '1.1.1',
+  APP_VERSION: '1.2.0',
   PORT: Number(process.env.JOB_FOR_PHD_PORT || 8420),
   PROJECT_ROOT,
   DASHBOARD_ROOT,
@@ -19,8 +21,13 @@ module.exports = {
   DASHBOARD_DATA_ROOT,
   RESUME_ROOT,
   RESUME_FILES_ROOT,
+  INTEGRATIONS_ROOT,
+  MAIL_ROOT,
   PROFILE_PATH: path.join(DATA_ROOT, 'profile.json'),
   PREFERENCES_PATH: path.join(DATA_ROOT, 'preferences.json'),
   ONBOARDING_PATH: path.join(DATA_ROOT, 'onboarding.json'),
   RESUME_INDEX_PATH: path.join(RESUME_ROOT, 'index.json'),
+  OUTLOOK_CONFIG_PATH: path.join(INTEGRATIONS_ROOT, 'outlook.json'),
+  OUTLOOK_CACHE_PATH: path.join(INTEGRATIONS_ROOT, 'outlook-token-cache'),
+  MAIL_REVIEW_PATH: path.join(MAIL_ROOT, 'review_queue.json'),
 };

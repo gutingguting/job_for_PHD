@@ -32,6 +32,15 @@ function copyIfMissing(source, destination) {
   return true;
 }
 
+function timestampBackup(filePath, backupRoot, label = 'migration') {
+  if (!fs.existsSync(filePath)) return null;
+  ensureDir(backupRoot);
+  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const destination = path.join(backupRoot, `${path.basename(filePath)}.${label}.${stamp}.bak`);
+  fs.copyFileSync(filePath, destination, fs.constants.COPYFILE_EXCL);
+  return destination;
+}
+
 function safeFilename(value) {
   const base = path.basename(String(value || 'resume'));
   return base
@@ -41,4 +50,4 @@ function safeFilename(value) {
     .slice(0, 120) || 'resume';
 }
 
-module.exports = { ensureDir, readJSON, writeJSON, atomicWrite, copyIfMissing, safeFilename };
+module.exports = { ensureDir, readJSON, writeJSON, atomicWrite, copyIfMissing, timestampBackup, safeFilename };
